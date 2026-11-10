@@ -1,0 +1,4 @@
+# Text files with LF line endings on every machine; the icon and any exe as they are.
+* text=auto eol=lf
+*.ico binary
+*.exe binary
