@@ -1,12 +1,13 @@
-# GameMargins Uploader
+# GameMargins Desktop
 
 A small, free Windows program that uploads the GameMargins addon's auction house scans from World of Warcraft:
 Forever to [gamemargins.com](https://gamemargins.com) by itself, the moment the game writes them, and keeps the addon
-installed and up to date. The way the big addons' desktop apps do it, without a password ever entering the program.
+installed and up to date, and itself too. The way the big addons' desktop apps do it, without a password ever entering the program.
 
-Download it from [Releases](https://github.com/gamemargins/wow-uploader/releases) (each release lists the exe's
+Download it from [Releases](https://github.com/gamemargins/desktop/releases) (each release lists the exe's
 SHA-256) or from the [addon page](https://gamemargins.com/wow-forever/addon). It runs on Windows 10 and 11 with
-nothing to install.
+nothing to install. Until 0.2.5 it was called GameMargins Uploader, and this repository gamemargins/wow-uploader (its
+addresses still lead here); updating keeps your settings, your link and autostart.
 
 ## What it does
 
@@ -17,6 +18,10 @@ nothing to install.
 - **Keeps the addon up to date.** When the addon is missing, or the site has a newer version, the program installs it
   while WoW is closed (**Keep the addon up to date** in the tray menu, on by default; turn it off if CurseForge or Wago
   does this for you).
+- **Keeps itself up to date.** At start and once a day it asks gamemargins.com which version is newest; a newer one is
+  downloaded from this repository's releases, checked, and takes over (**Keep the program up to date** in the tray
+  menu, on by default). Turn it off and a newer version shows as **Update to x.y.z** at the top of the menu instead.
+  An upload under way finishes first.
 - **Lives by the clock.** Once linked it sits in the notification area with the GameMargins mark: a left click opens
   the window (per WoW account its status, the addon, the last uploads, **Upload now**), a right click the menu. For ten
   minutes after an upload that stored a scan the icon carries a small green check, and its tooltip says when the last
@@ -44,12 +49,25 @@ WoW runs. It never touches the game itself, its memory or other addons.
   are left out of the check, and the site never keeps them. **Upload now** sends regardless; the site recognises a
   scan it already has and doesn't store it twice.
 - **A status check** at start and right after linking: whether the token is still good, your account's language, the
-  newest program version (the window says when a newer one is out; it never updates itself) and the addon zip the site
-  serves, with its version, size and SHA-256.
+  newest program version (the window says when a newer one is out) and the addon zip the site serves, with its
+  version, size and SHA-256.
 - **The addon zip download**, from the linked site only: refused unless its size and SHA-256 match what the status
   said, and unless it holds only the `GameMargins` folder of that version.
 
-Every request carries `GameMarginsUploader/<version> (Windows)` as its user agent; the status check and the upload
+**Fetches**, linked or not, while **Keep the program up to date** is ticked (with it unticked, only to show **Update
+to x.y.z**, and the download only after that click):
+
+- **The version file** `https://gamemargins.com/wow-forever/uploader.json`, at start and once a day: the newest
+  version, the address of its exe and the exe's SHA-256. That address only; the request carries no token and nothing
+  about you or the game.
+- **A newer version's exe**, only from `https://github.com/gamemargins/desktop/releases/download/` over HTTPS
+  (GitHub sends the download on to its own host, `*.githubusercontent.com`; nothing else is followed), at most 10 MB.
+  It is kept only when its SHA-256 is the one the version file names and its file data (Properties › Details) names
+  that version; otherwise nothing is kept and a notification says so and names gamemargins.com to download it from (an
+  antivirus web filter can replace or cut a download of this unsigned exe). Never an older version, and nothing when the
+  version can't be read. Like any download, GitHub sees the address you connect from.
+
+Every request carries `GameMarginsDesktop/<version> (Windows)` as its user agent; the status check and the upload
 also carry the token. Your account folders are Battle.net account names: they never leave your computer, are never
 written to a file, and the window calls them "WoW account 1, 2, …". Like any connection to a website, the address you connect from is visible to the site.
 
@@ -71,16 +89,21 @@ user or another computer can't read it), never in plain text. Unlink it with one
 It runs as a normal user program and never asks for administrator rights.
 
 - `%LOCALAPPDATA%\GameMargins\Uploader\`: `settings.json` (the site, your WoW folder, your account's language, the
-  two menu ticks, the protected token, fingerprints of the files already uploaded and the last eight uploads for the
-  window; no log file) and `logo.png`, the picture the notifications show.
-- **Start with Windows**: the value `GameMarginsUploader` under
+  three menu ticks, the newest version a "Version x.y.z is ready" notification announced, the protected token,
+  fingerprints of the files already uploaded and the last eight uploads for the window; no log file), `logo.png`, the
+  picture the notifications show, and the versions the program installed itself, `GameMarginsDesktop-<version>.exe`
+  (the one an update replaced is removed from there; a copy elsewhere, such as your download, is left alone).
+- **Start with Windows**: the value `GameMarginsUploader` (the name it had before 0.2.5, kept so autostart stays one
+  entry) under
   `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run`, only while **Start with Windows** in the tray menu
   is ticked. It is ticked at the first link; unticking it removes the value. While it is ticked, a start of the
-  program points the value at the exe that runs, so a newer download takes over autostart.
-- **A Start-menu shortcut**, `%APPDATA%\Microsoft\Windows\Start Menu\Programs\GameMargins Uploader.lnk`, pointing at
+  program points the value at the exe that runs, so a newer download takes over autostart, and an update points it at
+  the new version.
+- **A Start-menu shortcut**, `%APPDATA%\Microsoft\Windows\Start Menu\Programs\GameMargins Desktop.lnk`, pointing at
   the exe and carrying the program's AppUserModelID (`GameMargins.Uploader`). Windows needs it to show the program's
-  notifications with its name and icon; it is rewritten when the exe moved, and it makes the program findable in the
-  Start menu.
+  notifications with its name and icon; it is rewritten when the exe moved or the program updated itself, and it makes
+  the program findable in the Start menu. The shortcut of the old name, `GameMargins Uploader.lnk` in the same folder,
+  is removed at start: that file only, and only when it points at a GameMargins exe.
 - **The addon**, only while **Keep the addon up to date** is ticked and WoW is closed: `Interface\AddOns\GameMargins`
   in your WoW: Forever folder. A new version is unpacked in `Interface\GameMargins-staging` first (removed afterwards);
   the old folder moves to `Interface\GameMargins-backup\GameMargins-<old version>` (the last three are kept). Nothing
@@ -97,7 +120,7 @@ On Windows 10 or 11, with nothing to install (the C# compiler of the .NET Framew
 powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
 ```
 
-Output: `dist\GameMarginsUploader.exe`, and the same file as `dist\GameMarginsUploader-<version>.exe`, the name a
+Output: `dist\GameMarginsDesktop.exe`, and the same file as `dist\GameMarginsDesktop-<version>.exe`, the name a
 release publishes; the build prints its SHA-256. The version is `Program.Version` in `src\Program.cs`, the one place
 it is written: `src\AssemblyInfo.cs` stamps it into the exe's file data (Properties › Details), and the build checks
 that. The sources keep to C# 5, which that compiler speaks.
@@ -108,11 +131,12 @@ The release builds are not code-signed, so Windows SmartScreen warns on the firs
 Command-line options, for testing: `--site http://localhost:3000` points one start at another copy of the site (never
 remembered; a token from another site is dropped, and autostart is left alone), `--wow C:\path\to\_forever_` at
 another WoW folder (remembered as the program's folder), and `--test-toast` shows one test notification and writes the result to
-`%TEMP%\GameMargins-toast-test.txt`.
+`%TEMP%\GameMargins-toast-test.txt`. A `--site` start never updates itself. `--updated-from <exe>` is what an update passes to the new
+version it starts (the exe it replaces).
 
 ## Reporting a problem
 
-Open an [issue](https://github.com/gamemargins/wow-uploader/issues) with the program's version (in the exe's
+Open an [issue](https://github.com/gamemargins/desktop/issues) with the program's version (in the exe's
 Properties › Details, or the release you downloaded), your Windows version, and what the window or the notification
 said. Never post your `settings.json` or a token. For anything about your account, or a security problem you would
 rather not report in public, use the [contact page](https://gamemargins.com/contact).

@@ -84,7 +84,7 @@ namespace GameMargins.Uploader
         public Api(string site)
         {
             _http = new HttpClient { BaseAddress = new Uri(site + "/"), Timeout = TimeSpan.FromSeconds(90) };
-            _http.DefaultRequestHeaders.UserAgent.ParseAdd("GameMarginsUploader/" + Program.Version + " (Windows)");
+            _http.DefaultRequestHeaders.UserAgent.ParseAdd("GameMarginsDesktop/" + Program.Version + " (Windows)");
         }
 
         public async Task<LinkStart> StartLink()

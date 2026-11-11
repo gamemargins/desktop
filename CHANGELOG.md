@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.5 (2026-11-11)
+
+- **GameMargins Desktop** is the program's new name (until now GameMargins Uploader): in the window, the notifications,
+  the tray, the exe's file data, the download (`GameMarginsDesktop-0.2.5.exe`), the Start-menu shortcut
+  (`GameMargins Desktop.lnk`; the old `GameMargins Uploader.lnk` is removed when it points at a GameMargins exe) and the
+  user agent (`GameMarginsDesktop/0.2.5 (Windows)`). This repository is now github.com/gamemargins/desktop. The
+  settings, the link to your account and autostart stay as they were.
+- Keeps itself up to date: **Keep the program up to date** in the tray menu, on by default. At start and once a day
+  the program reads `https://gamemargins.com/wow-forever/uploader.json` (the newest version, its exe on this
+  repository's releases and the exe's SHA-256). A newer version is downloaded from
+  `https://github.com/gamemargins/desktop/releases/download/` only, kept only when its SHA-256 matches and its
+  file data names that version, and saved as `%LOCALAPPDATA%\GameMargins\Uploader\GameMarginsDesktop-<version>.exe`.
+  Autostart (while ticked) and the Start-menu shortcut move to it, it starts, the old copy quits, and a notification
+  says "Updated to x.y.z". An upload under way finishes first. A download that doesn't match keeps nothing and says
+  so, with the site to download it from instead (an antivirus web filter can replace or cut a download).
+- With the tick off, a newer version shows as **Update to x.y.z** in bold at the top of the menu, with one
+  notification; one click does the same update.
+- With the tick on, an older copy started from elsewhere (an old download on the desktop) hands over to the newer
+  one installed in that folder.
+- The tray icon's tooltip names the version.
+
 ## 0.2.4 (2026-11-10)
 
 The first release on GitHub.

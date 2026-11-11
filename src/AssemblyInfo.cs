@@ -8,10 +8,10 @@
 using System.Reflection;
 using GameMargins.Uploader;
 
-[assembly: AssemblyTitle("GameMargins Uploader")]
-[assembly: AssemblyProduct("GameMargins Uploader")]
+[assembly: AssemblyTitle("GameMargins Desktop")]
+[assembly: AssemblyProduct("GameMargins Desktop")]
 [assembly: AssemblyCompany("GameMargins")]
-[assembly: AssemblyDescription("Uploads the GameMargins addon's WoW: Forever auction house scans to gamemargins.com and keeps the addon up to date.")]
+[assembly: AssemblyDescription("Uploads the GameMargins addon's WoW: Forever auction house scans to gamemargins.com and keeps the addon and itself up to date.")]
 [assembly: AssemblyCopyright("© 2026 GameMargins")]
 [assembly: AssemblyVersion(Program.Version + ".0")]
 [assembly: AssemblyFileVersion(Program.Version + ".0")]

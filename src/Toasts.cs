@@ -4,8 +4,11 @@
 // things for toasts: an AppUserModelID
 // (GameMargins.Uploader, set on the process at start) and a Start-menu shortcut that carries that id, which is how
 // Windows knows the program's name and icon for the notification center and what to start when a notification is
-// clicked. The shortcut, "GameMargins Uploader.lnk" under the user's own Start menu, is made at every start when it
-// is missing and rewritten when the exe moved. The toast itself goes through the Windows Runtime
+// clicked. The shortcut, "GameMargins Desktop.lnk" under the user's own Start menu, is made at every start when it
+// is missing and rewritten when the exe moved, and the program's own update points it at the new exe. The shortcut
+// that versions before 0.2.5 made under the old name, "GameMargins Uploader.lnk", is removed at start (only that file,
+// only when it points at a GameMargins exe), so Windows knows the program by one name. The toast itself goes through the
+// Windows Runtime
 // (Windows.UI.Notifications), which the .NET Framework reaches through the WinMD references in build.ps1; the
 // methods that touch it are kept apart (NoInlining), so a Windows without it fails inside them and the caller falls
 // back to the balloon (MainForm.Notify).
@@ -28,7 +31,10 @@ namespace GameMargins.Uploader
     {
         /// <summary>The program's AppUserModelID: on the process, on the shortcut, and the notifier's name.</summary>
         public const string AppId = "GameMargins.Uploader";
-        public const string ShortcutName = "GameMargins Uploader.lnk";
+        public const string ShortcutName = "GameMargins Desktop.lnk";
+        /// <summary>The shortcut's name before 0.2.5, when the program was called GameMargins Uploader.</summary>
+        public const string OldShortcutName = "GameMargins Uploader.lnk";
+        private static readonly System.Text.RegularExpressions.Regex OurExe = new System.Text.RegularExpressions.Regex("^GameMargins(Uploader|Desktop)(-[0-9]+\\.[0-9]+\\.[0-9]+)?\\.exe$", System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
         [DllImport("shell32.dll", SetLastError = true)]
         private static extern int SetCurrentProcessExplicitAppUserModelID([MarshalAs(UnmanagedType.LPWStr)] string appId);
@@ -39,21 +45,54 @@ namespace GameMargins.Uploader
             try { SetCurrentProcessExplicitAppUserModelID(AppId); } catch (Exception) { }
         }
 
-        /// <summary>%APPDATA%\Microsoft\Windows\Start Menu\Programs\GameMargins Uploader.lnk</summary>
+        /// <summary>%APPDATA%\Microsoft\Windows\Start Menu\Programs\GameMargins Desktop.lnk</summary>
         public static string ShortcutPath
         {
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), ShortcutName); }
         }
 
         /// <summary>
-        /// The Start-menu shortcut with the AppUserModelID: made when it is missing, rewritten when it points at another
-        /// exe (the program moved) or lacks the id. True when it is in place.
+        /// Removes the shortcut of the program's old name, "GameMargins Uploader.lnk", from the user's own Start menu: that
+        /// exact file only, and only when it points at a GameMargins exe (GameMarginsUploader…exe or GameMarginsDesktop…exe).
         /// </summary>
-        public static bool EnsureShortcut()
+        public static void RemoveOldShortcut()
+        {
+            RemoveOldShortcut(Environment.GetFolderPath(Environment.SpecialFolder.Programs));
+        }
+
+        /// <summary>The same in another Start-menu Programs folder (a test's). True when a shortcut was removed.</summary>
+        public static bool RemoveOldShortcut(string programsFolder)
         {
             try
             {
-                var exe = Application.ExecutablePath;
+                if (string.IsNullOrEmpty(programsFolder)) return false;
+                var path = Path.Combine(programsFolder, OldShortcutName);
+                if (!File.Exists(path)) return false;
+                var target = ShortcutTarget(path);
+                if (string.IsNullOrEmpty(target) || !OurExe.IsMatch(Path.GetFileName(target))) return false;
+                File.Delete(path);
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// The Start-menu shortcut with the AppUserModelID, for the running exe: made when it is missing, rewritten when it
+        /// points at another exe (the program moved) or lacks the id. True when it is in place.
+        /// </summary>
+        public static bool EnsureShortcut()
+        {
+            return EnsureShortcut(Application.ExecutablePath);
+        }
+
+        /// <summary>The same for another exe: the program's own update points the shortcut at the new exe before starting it.</summary>
+        public static bool EnsureShortcut(string exe)
+        {
+            try
+            {
                 var path = ShortcutPath;
                 if (File.Exists(path) && ShortcutIsCurrent(path, exe)) return true;
                 WriteShortcut(path, exe);
@@ -178,7 +217,28 @@ namespace GameMargins.Uploader
             }
         }
 
-        private static void WriteShortcut(string path, string exe)
+        /// <summary>The exe a shortcut points at, as it stores it; null when the file can't be read as a shortcut.</summary>
+        internal static string ShortcutTarget(string path)
+        {
+            var link = (IShellLinkW)new CShellLink();
+            try
+            {
+                ((IPersistFile)link).Load(path, 0);
+                var target = new StringBuilder(1024);
+                link.GetPath(target, target.Capacity, IntPtr.Zero, 0);
+                return target.ToString();
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+            finally
+            {
+                Marshal.ReleaseComObject(link);
+            }
+        }
+
+        internal static void WriteShortcut(string path, string exe)
         {
             var link = (IShellLinkW)new CShellLink();
             try
@@ -186,7 +246,7 @@ namespace GameMargins.Uploader
                 link.SetPath(exe);
                 link.SetWorkingDirectory(Path.GetDirectoryName(exe));
                 link.SetArguments("");
-                link.SetDescription("GameMargins Uploader");
+                link.SetDescription("GameMargins Desktop");
                 link.SetIconLocation(exe, 0);
                 var key = AppIdKey;
                 var value = new PropVariant { vt = VT_LPWSTR, p = Marshal.StringToCoTaskMemUni(AppId) };

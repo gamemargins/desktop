@@ -1,10 +1,10 @@
-# Builds GameMargins Uploader with the C# compiler every Windows 10 and 11 ships in the .NET Framework (csc.exe of
+# Builds GameMargins Desktop with the C# compiler every Windows 10 and 11 ships in the .NET Framework (csc.exe of
 # .NET 4.x): nothing to install, and the program runs on any Windows with .NET Framework 4.7.2 or later, which both
 # have built in. One small exe, no installer, no runtime to download.
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
 #
-# Output: dist\GameMarginsUploader.exe, and the same file as dist\GameMarginsUploader-<version>.exe, the name a release
+# Output: dist\GameMarginsDesktop.exe, and the same file as dist\GameMarginsDesktop-<version>.exe, the name a release
 # publishes it under. The version is Program.Version in src\Program.cs, the one place it is written
 # (src\AssemblyInfo.cs stamps the same constant into the exe's file data, which the build checks). The build is not
 # signed, so Windows SmartScreen warns on the first start (see README.md).
@@ -28,7 +28,7 @@ $version = $found.Groups[1].Value
 
 $dist = Join-Path $here "dist"
 New-Item -ItemType Directory -Force $dist | Out-Null
-$out = Join-Path $dist "GameMarginsUploader.exe"
+$out = Join-Path $dist "GameMarginsDesktop.exe"
 $sources = Get-ChildItem (Join-Path $here "src") -Filter *.cs | ForEach-Object { $_.FullName }
 $icon = Join-Path $here "GameMargins.ico"
 if (-not (Test-Path $icon)) { throw "GameMargins.ico is missing" }
@@ -56,8 +56,10 @@ $size = [math]::Round((Get-Item $out).Length / 1KB)
 Write-Host "Built $out ($size KB, version $version)"
 
 # The release's file, under the version's name; older versioned builds in dist\ go.
-$releaseName = "GameMarginsUploader-$version.exe"
-Get-ChildItem $dist -Filter "GameMarginsUploader-*.exe" | Where-Object { $_.Name -ne $releaseName } | Remove-Item
+$releaseName = "GameMarginsDesktop-$version.exe"
+# Older versioned builds go, and the builds of the program's old name (GameMarginsUploader*.exe, before 0.2.5).
+Get-ChildItem $dist -Filter "GameMarginsDesktop-*.exe" | Where-Object { $_.Name -ne $releaseName } | Remove-Item
+Get-ChildItem $dist -Filter "GameMarginsUploader*.exe" | Remove-Item
 $release = Join-Path $dist $releaseName
 Copy-Item $out $release -Force
 Write-Host "Release file $release"

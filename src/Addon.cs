@@ -63,6 +63,12 @@ namespace GameMargins.Uploader
             _api = api;
         }
 
+        /// <summary>Whether a look at the addon (a download or an install) is under way; the program's own update waits for it.</summary>
+        public bool Busy
+        {
+            get { return _busy; }
+        }
+
         private void Report(AddonMark mark, string text)
         {
             if (Changed != null) Changed(new AddonStatus { Mark = mark, Text = text });

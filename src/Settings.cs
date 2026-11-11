@@ -1,8 +1,8 @@
 // What the program remembers between starts, in %LOCALAPPDATA%\GameMargins\Uploader\settings.json: the site the
 // token belongs to, the token (protected with DPAPI for this Windows user: another user or another computer can't read
-// it), the WoW folder, the account's language, the two ticks of the tray menu, the hashes of the files already
-// uploaded (so a restart doesn't send them again) and the last uploads the window lists. Never an account folder
-// name, never the file itself.
+// it), the WoW folder, the account's language, the three ticks of the tray menu, the newest program version a
+// notification already announced, the hashes of the files already uploaded (so a restart doesn't send them again) and
+// the last uploads the window lists. Never an account folder name, never the file itself.
 
 using System;
 using System.Collections.Generic;
@@ -38,6 +38,10 @@ namespace GameMargins.Uploader
         public bool AutostartDecided;
         /// <summary>The tray's "Keep the addon up to date": on by default; off for players who use CurseForge or Wago.</summary>
         public bool KeepAddonUpdated = true;
+        /// <summary>The tray's "Keep the program up to date": on by default; off, the menu offers "Update to x.y.z" instead.</summary>
+        public bool KeepProgramUpdated = true;
+        /// <summary>The newer version the "Version x.y.z is ready" notification announced, so it comes once per version.</summary>
+        public string UpdateNoted;
         /// <summary>The token in the clear while the program runs; stored protected.</summary>
         public string Token;
         public List<string> Uploaded = new List<string>();
@@ -67,6 +71,8 @@ namespace GameMargins.Uploader
                 s.StartWithWindows = Json.Bool(json, "startWithWindows");
                 s.AutostartDecided = Json.Bool(json, "autostartDecided");
                 s.KeepAddonUpdated = !Json.Has(json, "keepAddonUpdated") || Json.Bool(json, "keepAddonUpdated");
+                s.KeepProgramUpdated = !Json.Has(json, "keepProgramUpdated") || Json.Bool(json, "keepProgramUpdated");
+                s.UpdateNoted = Json.Str(json, "updateNoted");
                 s.Token = Unprotect(Json.Str(json, "token"));
                 foreach (var h in Json.List(json, "uploaded"))
                 {
@@ -107,6 +113,8 @@ namespace GameMargins.Uploader
                     { "startWithWindows", StartWithWindows },
                     { "autostartDecided", AutostartDecided },
                     { "keepAddonUpdated", KeepAddonUpdated },
+                    { "keepProgramUpdated", KeepProgramUpdated },
+                    { "updateNoted", UpdateNoted },
                     { "token", Protect(Token) },
                     { "uploaded", Uploaded },
                     { "uploads", uploads },

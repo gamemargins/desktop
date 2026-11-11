@@ -1,9 +1,12 @@
 // The program's face: once linked it lives by the clock with the site's mark as its icon; a left click opens the small
 // window (per WoW account the status, the addon, the last uploads, "Upload now", the line about the next upload), a
-// right click the menu (Upload now, Open gamemargins.com, Start with Windows, Keep the addon up to date, Quit); a
+// right click the menu (TrayMenu.cs: Upload now, Open gamemargins.com, Start with Windows, Keep the addon up to date,
+// Keep the program up to date, Quit, and "Update to x.y.z" on top while a newer version waits for a click); a
 // notification follows each upload, a Windows toast that stays in the notification center (Toasts.cs; the balloon tips
 // were lost to Do not disturb), and for ten minutes after a stored scan the tray icon carries a green check with
-// "Uploaded 3 min ago · 240,910 auctions" as its tooltip (TrayBadge.cs). Before it is linked, the window shows the link card (a
+// "Uploaded 3 min ago · 240,910 auctions" as its tooltip (TrayBadge.cs), which names the program's version otherwise
+// ("GameMargins Desktop 0.2.5"). The program's own update (Updater.cs) is driven from here: the checks, the menu's
+// offer, and the hand-over to the new exe once no upload is under way. Before it is linked, the window shows the link card (a
 // code, "Open gamemargins.com/link", waiting). Colours as the site's rules have them: gold only for the button and the
 // brand, orange for watch out (a skipped scan, no folder), red for a failure, blue for information, grey for
 // structure; "uploaded" is plain text in the window, and the check is green because green means done.
@@ -41,8 +44,9 @@ namespace GameMargins.Uploader
         private static readonly Font Strong = new Font("Segoe UI", 10.5F, FontStyle.Bold);
         private static readonly Font Code = new Font("Consolas", 26F);
 
-        private const string Title = "GameMargins Uploader";
+        private const string Title = "GameMargins Desktop";
         private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+        /// <summary>The Run value's name, kept from the program's old name (GameMargins Uploader) so autostart stays one entry.</summary>
         private const string RunValue = "GameMarginsUploader";
         private static readonly Regex UploadToken = new Regex("^gm_wu_[A-Za-z0-9_-]{43}$", RegexOptions.CultureInvariant);
         /// <summary>Codes whose fresh link the program asks for by itself before it waits for the window to be opened.</summary>
@@ -65,6 +69,13 @@ namespace GameMargins.Uploader
         private readonly System.Windows.Forms.Timer _maintain = new System.Windows.Forms.Timer();
         private readonly System.Windows.Forms.Timer _afterUpload = new System.Windows.Forms.Timer();
         private readonly System.Windows.Forms.Timer _retry = new System.Windows.Forms.Timer();
+        /// <summary>The program's own update check: shortly after the start, then once a day.</summary>
+        private readonly System.Windows.Forms.Timer _updateCheck = new System.Windows.Forms.Timer();
+        /// <summary>Waits until nothing is under way before handing over to a new exe.</summary>
+        private readonly System.Windows.Forms.Timer _handOver = new System.Windows.Forms.Timer();
+        private readonly Updater _updater;
+        /// <summary>The exe this copy replaced, when an update started it (--updated-from); null otherwise.</summary>
+        private readonly string _updatedFrom;
 
         private Panel _root;
         private FlowLayoutPanel _accountsPanel;
@@ -94,13 +105,28 @@ namespace GameMargins.Uploader
         private readonly HashSet<int> _inFlight = new HashSet<int>();
         private readonly HashSet<int> _again = new HashSet<int>();
         private int _uploadsRunning;
+        /// <summary>A folder picker or message box is open: the hand-over to a new exe waits for it.</summary>
+        private bool _dialogOpen;
 
-        public MainForm(Settings settings)
+        /// <summary>A newer version waiting for the player's click ("Keep the program up to date" off); null when there is none.</summary>
+        private ProgramRelease _offered;
+        private bool _updating;
+        /// <summary>A version whose download did not match or whose exe would not start: not tried again until the next start.</summary>
+        private string _skipVersion;
+        /// <summary>The checked new exe this copy hands over to once nothing is under way, and for which version; null before.</summary>
+        private string _handOverTo;
+        private ProgramRelease _handOverRelease;
+        /// <summary>Whether that update came from a click on "Update to x.y.z", which doesn't wait for an open window.</summary>
+        private bool _handOverClicked;
+
+        public MainForm(Settings settings, string updatedFrom)
         {
             _settings = settings;
+            _updatedFrom = updatedFrom;
             _api = new Api(settings.Site);
             _addon = new Addon(_api) { KeepUpdated = settings.KeepAddonUpdated };
             _addon.Changed += OnAddonChanged;
+            _updater = new Updater(new HttpUpdateWeb(), Settings.Folder, Program.Version);
 
             Text = Title;
             BackColor = Background;
@@ -145,6 +171,17 @@ namespace GameMargins.Uploader
                 _retry.Stop();
                 await UploadAll(false);
             };
+            // The program's own update: twenty seconds after the start, then once a day. Only for our own site: a test
+            // start against another one (--site) never updates itself.
+            _updateCheck.Interval = 20000;
+            _updateCheck.Tick += async delegate
+            {
+                _updateCheck.Interval = 24 * 60 * 60 * 1000;
+                await CheckForUpdate();
+            };
+            if (SelfUpdating) _updateCheck.Start();
+            _handOver.Interval = 5000;
+            _handOver.Tick += delegate { HandOverWhenIdle(); };
 
             _scanner.FileWritten += async delegate(WowAccount account) { await UploadAccount(account, false); };
             _scanner.AccountsChanged += delegate { RenderAccounts(); };
@@ -212,13 +249,19 @@ namespace GameMargins.Uploader
         /// </summary>
         private void Notify(string line, string tag, ToolTipIcon fallbackIcon, int balloonMs)
         {
+            Notify(Title, line, tag, fallbackIcon, balloonMs);
+        }
+
+        /// <summary>The same with a title of its own ("Updated to 0.2.5") above the line.</summary>
+        private void Notify(string title, string line, string tag, ToolTipIcon fallbackIcon, int balloonMs)
+        {
             try
             {
-                Toasts.Show(Title, line, tag);
+                Toasts.Show(title, line, tag);
             }
             catch (Exception)
             {
-                _tray.ShowBalloonTip(balloonMs, Title, line, fallbackIcon);
+                _tray.ShowBalloonTip(balloonMs, title, line, fallbackIcon);
             }
         }
 
@@ -253,10 +296,15 @@ namespace GameMargins.Uploader
             SetTrayText(line);
         }
 
-        /// <summary>The title and `line` as the tooltip, within NotifyIcon's 63 characters: the title goes first when they don't fit, then the line is cut.</summary>
+        /// <summary>
+        /// The title with the program's version and `line` as the tooltip, within NotifyIcon's 63 characters: the version
+        /// goes first when they don't fit, then the title, then the line is cut.
+        /// </summary>
         private void SetTrayText(string line)
         {
-            var text = string.IsNullOrEmpty(line) ? Title : Title + "\n" + line;
+            var titled = Title + " " + Program.Version;
+            var text = string.IsNullOrEmpty(line) ? titled : titled + "\n" + line;
+            if (text.Length > TrayTextMax) text = Title + "\n" + line;
             if (text.Length > TrayTextMax) text = line;
             if (text.Length > TrayTextMax) text = text.Substring(0, TrayTextMax - 1) + "…";
             try
@@ -273,6 +321,7 @@ namespace GameMargins.Uploader
 
         private async Task Begin()
         {
+            if (_updatedFrom != null) AfterUpdate();
             EnsureAutostart();
             EnsureWowFolder();
             if (string.IsNullOrEmpty(_settings.Token))
@@ -318,12 +367,20 @@ namespace GameMargins.Uploader
 
         private string AskWowFolder()
         {
-            using (var dialog = new FolderBrowserDialog { Description = Texts.T("Pick your World of Warcraft folder (the one that holds _forever_), or the _forever_ folder itself."), ShowNewFolderButton = false })
+            _dialogOpen = true;
+            try
             {
-                if (dialog.ShowDialog(this) != DialogResult.OK) return null;
-                var accepted = Scanner.Accept(dialog.SelectedPath);
-                if (accepted == null) MessageBox.Show(this, Texts.T("WoW folder not found."), Texts.T("Where is World of Warcraft?"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return accepted;
+                using (var dialog = new FolderBrowserDialog { Description = Texts.T("Pick your World of Warcraft folder (the one that holds _forever_), or the _forever_ folder itself."), ShowNewFolderButton = false })
+                {
+                    if (dialog.ShowDialog(this) != DialogResult.OK) return null;
+                    var accepted = Scanner.Accept(dialog.SelectedPath);
+                    if (accepted == null) MessageBox.Show(this, Texts.T("WoW folder not found."), Texts.T("Where is World of Warcraft?"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return accepted;
+                }
+            }
+            finally
+            {
+                _dialogOpen = false;
             }
         }
 
@@ -514,7 +571,7 @@ namespace GameMargins.Uploader
             _maintain.Stop();
             _retry.Stop();
             ShowLinkView(Texts.T("This program was unlinked on the site. Link it again with the code below."));
-            Notify(Texts.T("Link the upload program again: it was unlinked on the site."), "unlinked", ToolTipIcon.Warning, 8000);
+            Notify(Texts.T("Link the desktop app again: it was unlinked on the site."), "unlinked", ToolTipIcon.Warning, 8000);
             ShowWindow();
             await StartLinkFlow();
         }
@@ -739,6 +796,140 @@ namespace GameMargins.Uploader
             {
                 Notify(status.WasUpdate ? Texts.T("Addon updated to {0}.", status.JustInstalled) : Texts.T("Addon {0} installed in your game folder.", status.JustInstalled), "addon", ToolTipIcon.None, 5000);
             }
+        }
+
+        // ------------------------------------------------------------------------------------------------ the program's own update
+
+        /// <summary>Only a start that talks to our own site updates itself; a test start against another one (--site) never does.</summary>
+        private bool SelfUpdating
+        {
+            get { return _settings.Site == Program.DefaultSite; }
+        }
+
+        /// <summary>
+        /// Asks the site for its newest version (Updater.Check). A newer one is installed by itself with "Keep the program up
+        /// to date" ticked, else offered in the menu as "Update to x.y.z". A site that can't be reached: the next check.
+        /// </summary>
+        private async Task CheckForUpdate()
+        {
+            if (!SelfUpdating || _updating || _handOverTo != null || _quitting) return;
+            _updating = true;
+            ProgramRelease found;
+            try
+            {
+                found = await _updater.Check();
+            }
+            finally
+            {
+                _updating = false;
+            }
+            if (found == null || found.Version == _skipVersion) return;
+            if (_settings.KeepProgramUpdated) await InstallUpdate(found, false);
+            else Offer(found);
+        }
+
+        /// <summary>"Update to x.y.z" in bold on top of the menu, and once per version the notification that says where it is.</summary>
+        private void Offer(ProgramRelease release)
+        {
+            var changed = _offered == null || _offered.Version != release.Version;
+            _offered = release;
+            if (changed) BuildTrayMenu();
+            if (_settings.UpdateNoted == release.Version) return;
+            _settings.UpdateNoted = release.Version;
+            _settings.Save();
+            Notify(Texts.T("Version {0} is ready", release.Version), Texts.T("Right-click the shield in the tray, then {0}.", Texts.T("Update to {0}", release.Version)), "update", ToolTipIcon.Info, 6000);
+        }
+
+        private void DropOffer()
+        {
+            if (_offered == null) return;
+            _offered = null;
+            BuildTrayMenu();
+        }
+
+        /// <summary>
+        /// Downloads and checks `release` (Updater.Fetch), then hands over as soon as nothing is under way. A download that
+        /// doesn't match keeps nothing and says so once; one that can't be made says so only after a click.
+        /// </summary>
+        private async Task InstallUpdate(ProgramRelease release, bool clicked)
+        {
+            if (!SelfUpdating || _updating || _handOverTo != null || _quitting) return;
+            _updating = true;
+            UpdateResult result;
+            try
+            {
+                result = await _updater.Fetch(release);
+            }
+            finally
+            {
+                _updating = false;
+            }
+            if (result.Outcome == UpdateOutcome.Mismatch)
+            {
+                _skipVersion = release.Version;
+                DropOffer();
+                Notify(Texts.T("The download of version {0} did not match the site's checksum; nothing was kept. You can download it from {1}.", release.Version, SiteHost()), "update", ToolTipIcon.Warning, 6000);
+                return;
+            }
+            if (result.Outcome != UpdateOutcome.Ready)
+            {
+                if (clicked) Notify(Texts.T("Version {0} could not be downloaded or started; this version keeps running.", release.Version), "update", ToolTipIcon.Warning, 6000);
+                return;
+            }
+            _handOverTo = result.Exe;
+            _handOverRelease = release;
+            _handOverClicked = clicked;
+            HandOverWhenIdle();
+        }
+
+        /// <summary>
+        /// Hands over to the checked new exe once nothing is under way: no upload, no addon install, no folder dialog, and
+        /// for an update by itself no open window either (a click on "Update to" doesn't wait for that). Autostart (while
+        /// ticked) and the Start-menu shortcut point at the new exe, it starts with --updated-from naming this one, and
+        /// this copy quits. When Windows won't start it, both point back here and this copy keeps running.
+        /// </summary>
+        private void HandOverWhenIdle()
+        {
+            _handOver.Stop();
+            if (_handOverTo == null || _quitting) return;
+            if (!Updater.MayHandOver(_uploadsRunning, _addon.Busy, _dialogOpen, Visible, _handOverClicked))
+            {
+                _handOver.Start();
+                return;
+            }
+            var exe = _handOverTo;
+            PointAt(exe);
+            if (Updater.Start(exe, "--updated-from " + Updater.Quote(Application.ExecutablePath)))
+            {
+                Quit();
+                return;
+            }
+            PointAt(Application.ExecutablePath);
+            _skipVersion = _handOverRelease.Version;
+            _handOverTo = null;
+            DropOffer();
+            Notify(Texts.T("Version {0} could not be downloaded or started; this version keeps running.", _handOverRelease.Version), "update", ToolTipIcon.Warning, 6000);
+        }
+
+        /// <summary>Autostart (only while "Start with Windows" is ticked, as at every start) and the Start-menu shortcut follow `exe`.</summary>
+        private void PointAt(string exe)
+        {
+            if (_settings.StartWithWindows) WriteRunValue(exe);
+            Toasts.EnsureShortcut(exe);
+        }
+
+        /// <summary>
+        /// This copy was started by the update of an older one (--updated-from): it says so once, and removes the old exe
+        /// when that one was installed next to the settings too (a copy elsewhere is the player's and stays).
+        /// </summary>
+        private void AfterUpdate()
+        {
+            var line = _settings.KeepProgramUpdated
+                ? Texts.T("The desktop app updated itself. Turn this off in its menu: {0}.", Texts.T("Keep the program up to date"))
+                : Texts.T("The desktop app restarted in its new version.");
+            Notify(Texts.T("Updated to {0}", Program.Version), line, "updated", ToolTipIcon.None, 6000);
+            var removal = Updater.RemoveReplaced(Settings.Folder, _updatedFrom, Application.ExecutablePath);
+            GC.KeepAlive(removal);
         }
 
         // ------------------------------------------------------------------------------------------------ the views
@@ -1007,30 +1198,61 @@ namespace GameMargins.Uploader
 
         // ------------------------------------------------------------------------------------------------ the tray
 
+        /// <summary>The menu (TrayMenu.cs) from the settings and the version on offer; again whenever one of them changes.</summary>
         private void BuildTrayMenu()
         {
-            var menu = new ContextMenuStrip();
-            menu.Items.Add(Texts.T("Upload now"), null, async delegate { await UploadAll(true); });
-            menu.Items.Add(Texts.T("Open {0}", SiteHost()), null, delegate { OpenSite("/wow-forever"); });
-            menu.Items.Add(new ToolStripSeparator());
-            var autostart = new ToolStripMenuItem(Texts.T("Start with Windows")) { CheckOnClick = true, Checked = _settings.StartWithWindows };
-            autostart.CheckedChanged += delegate
+            var state = new TrayMenuState
             {
-                _settings.AutostartDecided = true;
-                SetStartWithWindows(autostart.Checked);
+                Host = SiteHost(),
+                StartWithWindows = _settings.StartWithWindows,
+                KeepAddonUpdated = _settings.KeepAddonUpdated,
+                KeepProgramUpdated = _settings.KeepProgramUpdated,
+                UpdateTo = _offered != null ? _offered.Version : null,
             };
-            menu.Items.Add(autostart);
-            var keep = new ToolStripMenuItem(Texts.T("Keep the addon up to date")) { CheckOnClick = true, Checked = _settings.KeepAddonUpdated };
-            keep.CheckedChanged += async delegate
+            var actions = new TrayMenuActions
             {
-                _settings.KeepAddonUpdated = keep.Checked;
-                _settings.Save();
-                _addon.KeepUpdated = keep.Checked;
-                if (!string.IsNullOrEmpty(_settings.Token)) await _addon.Maintain(_scanner.WowFolder);
+                Update = async delegate
+                {
+                    var release = _offered;
+                    if (release != null) await InstallUpdate(release, true);
+                },
+                UploadNow = async delegate { await UploadAll(true); },
+                OpenSite = delegate { OpenSite("/wow-forever"); },
+                Quit = Quit,
+                StartWithWindows = delegate(bool on)
+                {
+                    _settings.AutostartDecided = true;
+                    SetStartWithWindows(on);
+                },
+                KeepAddonUpdated = async delegate(bool on)
+                {
+                    _settings.KeepAddonUpdated = on;
+                    _settings.Save();
+                    _addon.KeepUpdated = on;
+                    if (!string.IsNullOrEmpty(_settings.Token)) await _addon.Maintain(_scanner.WowFolder);
+                },
+                KeepProgramUpdated = async delegate(bool on)
+                {
+                    _settings.KeepProgramUpdated = on;
+                    _settings.Save();
+                    // Ticked: a version on offer goes in now, else the site is asked; the "Update to" line leaves the menu.
+                    // Unticked while an update by itself waits to hand over: it waits for a click instead (the checked
+                    // exe stays, so the click needs no second download). The menu is built again once this click is done.
+                    var offered = _offered;
+                    if (on) _offered = null;
+                    else if (_handOverTo != null && !_handOverClicked)
+                    {
+                        _handOver.Stop();
+                        _offered = _handOverRelease;
+                        _handOverTo = null;
+                    }
+                    BeginInvoke(new Action(BuildTrayMenu));
+                    if (!on) return;
+                    if (offered != null) await InstallUpdate(offered, false);
+                    else await CheckForUpdate();
+                },
             };
-            menu.Items.Add(keep);
-            menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(Texts.T("Quit"), null, delegate { Quit(); });
+            var menu = TrayMenu.Build(state, actions);
             var old = _tray.ContextMenuStrip;
             _tray.ContextMenuStrip = menu;
             if (old != null) old.Dispose();
@@ -1040,13 +1262,16 @@ namespace GameMargins.Uploader
         {
             _settings.StartWithWindows = on;
             _settings.Save();
+            if (on)
+            {
+                WriteRunValue(Application.ExecutablePath);
+                return;
+            }
             try
             {
                 using (var key = Registry.CurrentUser.OpenSubKey(RunKey, true))
                 {
-                    if (key == null) return;
-                    if (on) key.SetValue(RunValue, RunCommand());
-                    else key.DeleteValue(RunValue, false);
+                    if (key != null) key.DeleteValue(RunValue, false);
                 }
             }
             catch (Exception)
@@ -1057,33 +1282,40 @@ namespace GameMargins.Uploader
 
         /// <summary>
         /// At every start, the way Toasts.EnsureShortcut keeps the Start-menu shortcut: with "Start with Windows" on, the
-        /// Run value is written again when it doesn't start this exe (since 0.2.4 every version downloads under its own
-        /// name, GameMarginsUploader-0.2.4.exe, so a new file would leave autostart on the old one). With it off nothing
-        /// is written, and a test start against another site (--site) leaves it alone too.
+        /// Run value is written again when it doesn't start this exe (every version has its own file name,
+        /// GameMarginsDesktop-0.2.5.exe, so a new file would leave autostart on the old one; the program's own update
+        /// points it at the new exe before starting it, PointAt). With it off nothing is written, and a test start against
+        /// another site (--site) leaves it alone too.
         /// </summary>
         private void EnsureAutostart()
         {
             if (!_settings.StartWithWindows || _settings.Site != Program.DefaultSite) return;
+            WriteRunValue(Application.ExecutablePath);
+        }
+
+        /// <summary>The Run value pointed at `exe`, written only when it says something else.</summary>
+        private static void WriteRunValue(string exe)
+        {
             try
             {
                 using (var key = Registry.CurrentUser.OpenSubKey(RunKey, true))
                 {
                     if (key == null) return;
-                    var command = RunCommand();
+                    var command = RunCommand(exe);
                     if (string.Equals(key.GetValue(RunValue) as string, command, StringComparison.OrdinalIgnoreCase)) return;
                     key.SetValue(RunValue, command);
                 }
             }
             catch (Exception)
             {
-                // No registry access: as in SetStartWithWindows.
+                // No registry access: the tick stays, Windows just won't start it.
             }
         }
 
-        /// <summary>What the Run value holds: this exe, quoted.</summary>
-        private static string RunCommand()
+        /// <summary>What the Run value holds: the exe, quoted.</summary>
+        private static string RunCommand(string exe)
         {
-            return "\"" + Application.ExecutablePath + "\"";
+            return "\"" + exe + "\"";
         }
 
         private void ShowWindow()
@@ -1131,6 +1363,8 @@ namespace GameMargins.Uploader
                 _maintain.Dispose();
                 _afterUpload.Dispose();
                 _retry.Dispose();
+                _updateCheck.Dispose();
+                _handOver.Dispose();
             }
             base.Dispose(disposing);
         }
