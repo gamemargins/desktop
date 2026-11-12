@@ -245,23 +245,19 @@ namespace GameMargins.Uploader
         /// <summary>
         /// A notification that stays: a Windows toast in the notification center (Toasts.Show; also under Do not disturb,
         /// which hides the banner but keeps the notification), and the old balloon where the toast can't be made (a
-        /// Windows without the runtime, a shortcut that could not be written). `tag` names the kind for the center.
+        /// Windows without the runtime, a shortcut that could not be written). `toast` is its title and line, from
+        /// ToastTexts (short enough to be read whole where the notification center shows it folded); `tag` names the kind
+        /// for the center.
         /// </summary>
-        private void Notify(string line, string tag, ToolTipIcon fallbackIcon, int balloonMs)
-        {
-            Notify(Title, line, tag, fallbackIcon, balloonMs);
-        }
-
-        /// <summary>The same with a title of its own ("Updated to 0.2.5") above the line.</summary>
-        private void Notify(string title, string line, string tag, ToolTipIcon fallbackIcon, int balloonMs)
+        private void Notify(string[] toast, string tag, ToolTipIcon fallbackIcon, int balloonMs)
         {
             try
             {
-                Toasts.Show(title, line, tag);
+                Toasts.Show(toast[0], toast[1], tag);
             }
             catch (Exception)
             {
-                _tray.ShowBalloonTip(balloonMs, title, line, fallbackIcon);
+                _tray.ShowBalloonTip(balloonMs, toast[0], toast[1], fallbackIcon);
             }
         }
 
@@ -571,7 +567,7 @@ namespace GameMargins.Uploader
             _maintain.Stop();
             _retry.Stop();
             ShowLinkView(Texts.T("This program was unlinked on the site. Link it again with the code below."));
-            Notify(Texts.T("Link the desktop app again: it was unlinked on the site."), "unlinked", ToolTipIcon.Warning, 8000);
+            Notify(ToastTexts.Unlinked(), "unlinked", ToolTipIcon.Warning, 8000);
             ShowWindow();
             await StartLinkFlow();
         }
@@ -665,9 +661,8 @@ namespace GameMargins.Uploader
                         RefreshTray();
                         if (first != null)
                         {
-                            var line = Texts.T("Uploaded: {0} auctions · {1}", first.Auctions.ToString("N0", Texts.Culture), MarketLabel(first.Market));
-                            SetResult(line, Foreground);
-                            Notify(line, "upload", ToolTipIcon.None, 4000);
+                            SetResult(Texts.T("Uploaded: {0} auctions · {1}", first.Auctions.ToString("N0", Texts.Culture), MarketLabel(first.Market)), Foreground);
+                            Notify(ToastTexts.Uploaded(first.Auctions, first.Market), "upload", ToolTipIcon.None, 4000);
                         }
                         else if (skipped != null) SetResult(Texts.T("Skipped: {0}", RefusalText(skipped.Code, skipped.Why)), Warning);
                         // No scan stored, nothing skipped: the file went for its characters (a level-up, a skill-up), or for nothing.
@@ -690,7 +685,7 @@ namespace GameMargins.Uploader
                             var why = Texts.T("Upload failed: {0}", RefusalText(result.Code, result.Error));
                             SetStatus(account, Texts.T("upload failed"), Negative);
                             SetResult(why, Negative);
-                            Notify(why, "failed", ToolTipIcon.Error, 5000);
+                            Notify(ToastTexts.UploadFailed(result.Code), "failed", ToolTipIcon.Error, 5000);
                         }
                         break;
                     default:
@@ -750,7 +745,7 @@ namespace GameMargins.Uploader
         }
 
         /// <summary>"EU · Normal · Horde" from "eu-normal-horde": the names the game itself uses, in every language (the site's glossaries keep them English).</summary>
-        private static string MarketLabel(string market)
+        internal static string MarketLabel(string market)
         {
             if (string.IsNullOrEmpty(market)) return "?";
             var parts = market.Split('-');
@@ -794,7 +789,7 @@ namespace GameMargins.Uploader
             }
             if (status.JustInstalled != null)
             {
-                Notify(status.WasUpdate ? Texts.T("Addon updated to {0}.", status.JustInstalled) : Texts.T("Addon {0} installed in your game folder.", status.JustInstalled), "addon", ToolTipIcon.None, 5000);
+                Notify(ToastTexts.Addon(status.JustInstalled, status.WasUpdate), "addon", ToolTipIcon.None, 5000);
             }
         }
 
@@ -837,7 +832,7 @@ namespace GameMargins.Uploader
             if (_settings.UpdateNoted == release.Version) return;
             _settings.UpdateNoted = release.Version;
             _settings.Save();
-            Notify(Texts.T("Version {0} is ready", release.Version), Texts.T("Right-click the shield in the tray, then {0}.", Texts.T("Update to {0}", release.Version)), "update", ToolTipIcon.Info, 6000);
+            Notify(ToastTexts.UpdateReady(release.Version), "update", ToolTipIcon.Info, 6000);
         }
 
         private void DropOffer()
@@ -868,12 +863,12 @@ namespace GameMargins.Uploader
             {
                 _skipVersion = release.Version;
                 DropOffer();
-                Notify(Texts.T("The download of version {0} did not match the site's checksum; nothing was kept. You can download it from {1}.", release.Version, SiteHost()), "update", ToolTipIcon.Warning, 6000);
+                Notify(ToastTexts.UpdateMismatch(release.Version, SiteHost()), "update", ToolTipIcon.Warning, 6000);
                 return;
             }
             if (result.Outcome != UpdateOutcome.Ready)
             {
-                if (clicked) Notify(Texts.T("Version {0} could not be downloaded or started; this version keeps running.", release.Version), "update", ToolTipIcon.Warning, 6000);
+                if (clicked) Notify(ToastTexts.UpdateFailed(release.Version), "update", ToolTipIcon.Warning, 6000);
                 return;
             }
             _handOverTo = result.Exe;
@@ -908,7 +903,7 @@ namespace GameMargins.Uploader
             _skipVersion = _handOverRelease.Version;
             _handOverTo = null;
             DropOffer();
-            Notify(Texts.T("Version {0} could not be downloaded or started; this version keeps running.", _handOverRelease.Version), "update", ToolTipIcon.Warning, 6000);
+            Notify(ToastTexts.UpdateFailed(_handOverRelease.Version), "update", ToolTipIcon.Warning, 6000);
         }
 
         /// <summary>Autostart (only while "Start with Windows" is ticked, as at every start) and the Start-menu shortcut follow `exe`.</summary>
@@ -924,10 +919,7 @@ namespace GameMargins.Uploader
         /// </summary>
         private void AfterUpdate()
         {
-            var line = _settings.KeepProgramUpdated
-                ? Texts.T("The desktop app updated itself. Turn this off in its menu: {0}.", Texts.T("Keep the program up to date"))
-                : Texts.T("The desktop app restarted in its new version.");
-            Notify(Texts.T("Updated to {0}", Program.Version), line, "updated", ToolTipIcon.None, 6000);
+            Notify(ToastTexts.Updated(Program.Version, _settings.KeepProgramUpdated), "updated", ToolTipIcon.None, 6000);
             var removal = Updater.RemoveReplaced(Settings.Folder, _updatedFrom, Application.ExecutablePath);
             GC.KeepAlive(removal);
         }
@@ -1340,7 +1332,7 @@ namespace GameMargins.Uploader
             Hide();
             if (_hiddenOnce) return;
             _hiddenOnce = true;
-            Notify(Texts.T("Still running by the clock. Uploads continue; right-click the icon to quit."), "clock", ToolTipIcon.None, 5000);
+            Notify(ToastTexts.StillRunning(), "clock", ToolTipIcon.None, 5000);
         }
 
         private void Quit()

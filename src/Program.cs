@@ -28,7 +28,7 @@ namespace GameMargins.Uploader
         /// reads it for the download's name (GameMarginsDesktop-x.y.z.exe). The site's version file names the newest
         /// version (Updater.cs); a newer one is installed by itself, or with a click in the menu.
         /// </summary>
-        public const string Version = "0.2.5";
+        public const string Version = "0.2.6";
         public const string DefaultSite = "https://gamemargins.com";
 
         [STAThread]

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.6 (2026-11-12)
+
+- The notification after an upload names the auction house again. Windows' notification center shows a notification
+  folded, with only the first line of its text, and cut "Uploaded: 244,569 auctions · EU · Normal · Horde" after
+  "EU ·". Now "Uploaded: 244,569 auctions" is the notification's title and the auction house, "EU · Normal · Horde",
+  has the line below it to itself. The program's name still stands above the notification.
+- Every other notification follows the same rule: a title that says what happened and one short line that is seen
+  whole, in all six languages. For example "Updated itself to 0.2.6" above "Turn this off in its menu.", "Upload
+  failed" above "The file is over 12 MB." (the window still gives the full reason), "Version 0.2.7 is ready" above
+  "Right-click the shield to update.".
+
 ## 0.2.5 (2026-11-11)
 
 - **GameMargins Desktop** is the program's new name (until now GameMargins Uploader): in the window, the notifications,

@@ -104,24 +104,35 @@ namespace GameMargins.Uploader
             }
         }
 
-        /// <summary>A notification: `title` above `line`, with the site's mark. Throws where the Windows Runtime isn't there; the caller falls back.</summary>
+        /// <summary>
+        /// A notification: `title` above `line`, with the site's mark. Throws where the Windows Runtime isn't there; the
+        /// caller falls back. The notification center shows a notification folded until it is opened: the title on up to
+        /// two lines and only the first line of `line`, cut at a space without a "…". What must be read there goes in the
+        /// title, and `line` is one short line (ToastTexts).
+        /// </summary>
         [MethodImpl(MethodImplOptions.NoInlining)]
         public static void Show(string title, string line, string tag)
         {
             var logo = EnsureLogo();
-            var sb = new StringBuilder();
-            sb.Append("<toast><visual><binding template=\"ToastGeneric\">");
-            if (logo != null) sb.Append("<image placement=\"appLogoOverride\" src=\"").Append(SecurityElement.Escape(new Uri(logo).AbsoluteUri)).Append("\"/>");
-            sb.Append("<text>").Append(SecurityElement.Escape(title)).Append("</text>");
-            sb.Append("<text>").Append(SecurityElement.Escape(line)).Append("</text>");
-            sb.Append("</binding></visual></toast>");
             var xml = new XmlDocument();
-            xml.LoadXml(sb.ToString());
+            xml.LoadXml(Xml(title, line, logo != null ? new Uri(logo).AbsoluteUri : null));
             var toast = new ToastNotification(xml);
             // A tag and group let the notification center keep each kind apart (a tag is at most 16 characters on older Windows 10).
             if (!string.IsNullOrEmpty(tag)) toast.Tag = tag.Length > 16 ? tag.Substring(0, 16) : tag;
             toast.Group = "uploader";
             ToastNotificationManager.CreateToastNotifier(AppId).Show(toast);
+        }
+
+        /// <summary>The toast's XML for Show: the picture at `logoUri` (a file: address) when there is one, then `title` and `line` as plain text, escaped.</summary>
+        internal static string Xml(string title, string line, string logoUri)
+        {
+            var sb = new StringBuilder();
+            sb.Append("<toast><visual><binding template=\"ToastGeneric\">");
+            if (logoUri != null) sb.Append("<image placement=\"appLogoOverride\" src=\"").Append(SecurityElement.Escape(logoUri)).Append("\"/>");
+            sb.Append("<text>").Append(SecurityElement.Escape(title)).Append("</text>");
+            sb.Append("<text>").Append(SecurityElement.Escape(line)).Append("</text>");
+            sb.Append("</binding></visual></toast>");
+            return sb.ToString();
         }
 
         /// <summary>How many of the program's notifications the notification center holds (the --test-toast check).</summary>
