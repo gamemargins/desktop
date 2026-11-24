@@ -65,7 +65,7 @@ namespace GameMargins.Uploader
         public bool FloatShown = true;
         /// <summary>"Lock the float (click through)".</summary>
         public bool FloatLocked;
-        /// <summary>The float's size: "large" or "small".</summary>
+        /// <summary>The float's size: "large", "small" or "bar" (the bar from 0.4.1).</summary>
         public string FloatSize = "large";
         /// <summary>The size the player dragged the large float to ("320,460", pixels at 96 dpi); null until they do.</summary>
         public string FloatLarge;
@@ -77,6 +77,8 @@ namespace GameMargins.Uploader
         public bool LanguageStep;
         /// <summary>Where the float's top right corner stood, "x,y", per arrangement of screens.</summary>
         public Dictionary<string, string> FloatPlaces = new Dictionary<string, string>();
+        /// <summary>Where the bar stood, "x,y,side" (x its left, its right or its middle: the side it sticks to), per arrangement of screens; apart from the float's.</summary>
+        public Dictionary<string, string> FloatBarPlaces = new Dictionary<string, string>();
         /// <summary>The Tempo window's place and size, "x,y,w,h"; null until it was moved.</summary>
         public string TempoBounds;
         /// <summary>The first start's steps were gone through once: after that a step that comes back (a link the site dropped) shows without the step bars.</summary>
@@ -121,7 +123,8 @@ namespace GameMargins.Uploader
                 s.StartTempoWithGame = Json.Bool(json, "startTempoWithGame");
                 s.FloatShown = !Json.Has(json, "floatShown") || Json.Bool(json, "floatShown");
                 s.FloatLocked = Json.Bool(json, "floatLocked");
-                s.FloatSize = Json.Str(json, "floatSize") == "small" ? "small" : "large";
+                var floatSize = Json.Str(json, "floatSize");
+                s.FloatSize = floatSize == "small" || floatSize == "bar" ? floatSize : "large";
                 s.FloatLarge = Json.Str(json, "floatLarge");
                 var appearance = Json.Str(json, "appearance");
                 s.Appearance = appearance == "light" || appearance == "dark" ? appearance : "system";
@@ -138,6 +141,8 @@ namespace GameMargins.Uploader
                 s.UpdateBad = Json.Str(json, "updateBad");
                 var places = Json.Object(json, "floatPlaces");
                 if (places != null) foreach (var place in places) if (place.Value is string) s.FloatPlaces[place.Key] = (string)place.Value;
+                var barPlaces = Json.Object(json, "floatBarPlaces");
+                if (barPlaces != null) foreach (var place in barPlaces) if (place.Value is string) s.FloatBarPlaces[place.Key] = (string)place.Value;
                 s.Site = Json.Str(json, "site");
                 s.WowFolder = Json.Str(json, "wowFolder");
                 s.Locale = Json.Str(json, "locale");
@@ -205,6 +210,7 @@ namespace GameMargins.Uploader
                     { "languageAsked", LanguageAsked },
                     { "languageStep", LanguageStep },
                     { "floatPlaces", FloatPlaces },
+                    { "floatBarPlaces", FloatBarPlaces },
                     { "tempoBounds", TempoBounds },
                     { "setupDone", SetupDone },
                     { "tempoAsked", TempoAsked },

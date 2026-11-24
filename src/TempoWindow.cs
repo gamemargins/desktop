@@ -3,7 +3,8 @@
 // the numbers; this program never looks inside a frame.
 //
 // What the window allows, and nothing more:
-//   - It shows the Tempo page only. Any other link opens in the player's own browser.
+//   - It shows the Tempo page only (also with one of the site's languages before its path: /nl/…). Any other link
+//     opens in the player's own browser; the Tempo page itself never does.
 //   - The page can't share a screen or a window by itself, nor use the camera, the microphone or the location.
 //   - Tempo's token never enters the page: the program adds it to the page's requests to the site's Tempo routes
 //     (/api/maplestory/tempo-…) and to nothing else.
@@ -284,11 +285,50 @@ namespace GameMargins.Uploader
 
         // ------------------------------------------------------------------------------------------------ what the page may do
 
-        private bool IsPage(string address)
+        /// <summary>Tempo's page for this program, as the site's start route names it (without a language before it).</summary>
+        internal const string DesktopPath = "/maplestory-classic/tempo-desktop";
+        /// <summary>The site's languages, as they stand before a page's path ("/nl/maplestory-classic/tempo-desktop").</summary>
+        private static readonly string[] Languages = { "en", "nl", "de", "fr", "es", "pt-br" };
+
+        /// <summary>A path without the site's language before it: "/nl/maplestory-classic/tempo-desktop" is "/maplestory-classic/tempo-desktop".</summary>
+        internal static string WithoutLanguage(string path)
+        {
+            path = path ?? "";
+            foreach (var language in Languages)
+            {
+                var prefix = "/" + language + "/";
+                if (path.StartsWith(prefix, StringComparison.Ordinal)) return path.Substring(prefix.Length - 1);
+            }
+            return path;
+        }
+
+        /// <summary>
+        /// Whether `address` is this window's page: on the site this start talks to (`origin`), at the page's path, also with
+        /// one of the site's languages before it: should the site send /maplestory-classic/tempo-desktop on to
+        /// /nl/maplestory-classic/tempo-desktop (a Windows in Dutch), the window shows it rather than staying empty.
+        /// </summary>
+        internal static bool IsPageAddress(string address, string origin, string pagePath)
         {
             Uri u;
             if (!Uri.TryCreate(address, UriKind.Absolute, out u)) return false;
-            return string.Equals(u.GetLeftPart(UriPartial.Authority), _origin, StringComparison.OrdinalIgnoreCase) && u.AbsolutePath == _page.AbsolutePath;
+            return string.Equals(u.GetLeftPart(UriPartial.Authority), origin, StringComparison.OrdinalIgnoreCase) && WithoutLanguage(u.AbsolutePath) == WithoutLanguage(pagePath);
+        }
+
+        /// <summary>
+        /// Whether `address` is the program's own Tempo page, on any site, with or without a language and a slash at its end.
+        /// That page belongs in this window and never in a browser.
+        /// </summary>
+        internal static bool IsDesktopPage(string address, string pagePath)
+        {
+            Uri u;
+            if (!Uri.TryCreate(address, UriKind.Absolute, out u)) return false;
+            var path = WithoutLanguage(u.AbsolutePath).TrimEnd('/');
+            return string.Equals(path, DesktopPath, StringComparison.OrdinalIgnoreCase) || (pagePath != null && string.Equals(path, WithoutLanguage(pagePath).TrimEnd('/'), StringComparison.OrdinalIgnoreCase));
+        }
+
+        private bool IsPage(string address)
+        {
+            return IsPageAddress(address, _origin, _page.AbsolutePath);
         }
 
         private bool IsTempoRoute(string address)
@@ -298,11 +338,19 @@ namespace GameMargins.Uploader
             return string.Equals(u.GetLeftPart(UriPartial.Authority), _origin, StringComparison.OrdinalIgnoreCase) && u.AbsolutePath.StartsWith("/api/maplestory/tempo-", StringComparison.Ordinal);
         }
 
-        /// <summary>An address in the player's own browser: https, or the site this start talks to. Nothing else goes to Windows.</summary>
+        /// <summary>
+        /// An address in the player's own browser: https, or the site this start talks to. Nothing else goes to Windows, and
+        /// never Tempo's own page: that one is said in the log and opened nowhere.
+        /// </summary>
         private void OpenOutside(string address)
         {
             Uri u;
             if (!Uri.TryCreate(address, UriKind.Absolute, out u)) return;
+            if (IsDesktopPage(address, _page != null ? _page.AbsolutePath : null))
+            {
+                Tempo.Log("Tempo's own page was not opened in the browser: " + u.GetLeftPart(UriPartial.Authority) + u.AbsolutePath);
+                return;
+            }
             var own = string.Equals(u.GetLeftPart(UriPartial.Authority), _origin, StringComparison.OrdinalIgnoreCase);
             if (u.Scheme != Uri.UriSchemeHttps && !own) return;
             try { Process.Start(u.AbsoluteUri); } catch (Exception) { }

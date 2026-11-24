@@ -341,6 +341,8 @@ namespace GameMargins.Uploader
                             RealFloat(Path.Combine(folder, "float-large-real-pictures-largest-445x620" + tail), scale, light, new Size(445, 620), null, false, false);
                             RealFloat(Path.Combine(folder, "float-large-real-pictures-largest-445x620-locked" + tail), scale, light, new Size(445, 620), null, true, false);
                             RealFloat(Path.Combine(folder, "float-small-real-locked" + tail), scale, light, Size.Empty, null, true, true);
+                            // The bar in every state, all states on one sheet, and the button that goes round with its name card.
+                            BarShots(folder, tail, scale, light);
                             // Windows' own menu, filled and laid out as by the clock (never shown), with the longest first line.
                             RealMenuCheck(LongStateMenu(form), "picture", Texts.Language, new KeyValuePair<string, float>(Path.Combine(folder, "menu-real-long-first-line" + tail), scale));
                             Menu(form.SceneMenu(true), Path.Combine(folder, "menu-two-games" + tail), scale);
@@ -384,6 +386,7 @@ namespace GameMargins.Uploader
                     }
                 }
                 FloatSweep();
+                BarSweep();
                 var problems = Path.Combine(folder, "shots-problems.txt");
                 if (Problems.Count > 0) File.WriteAllLines(problems, Problems.ToArray());
                 else if (File.Exists(problems)) File.Delete(problems);
@@ -823,6 +826,269 @@ namespace GameMargins.Uploader
                 foreach (var count in new[] { "66", "54", "49", "28", "2" }) v.Here.Items.Add(new FloatHereItem { Count = count });
             }
             return v;
+        }
+
+        // ------------------------------------------------------------------------------------------------ the bar
+
+        /// <summary>A state of the bar for a picture: its name, what it shows, and whether it is locked.</summary>
+        private sealed class BarShot
+        {
+            public string Name;
+            public FloatValues Values;
+            public bool Locked;
+        }
+
+        /// <summary>Made-up numbers for the bar: the usual ones, and the longest a bar meets (a long map, numbers in the millions, 2:26:14).</summary>
+        private static FloatValues BarValues(string state, bool full)
+        {
+            var v = Sample(state, 0);
+            if (state == "reading") v.Place = "Primeval Forest II";
+            if (state != "idle") v.NextPercent = 34;
+            if (full)
+            {
+                v.Clock = "2:26:14";
+                if (state == "reading") v.Place = "Construction Site North of Kerning City";
+                v.Rows[0].Value = "1,284,377";
+                v.Rows[1].Value = "2,401,950";
+                v.Rows[2].Value = "1,450";
+                v.NextValue = "312 h 45 min";
+                v.NextIn = "in 312 h 45 min";
+                v.NextPercent = 3;
+            }
+            return v;
+        }
+
+        private static List<BarShot> Bars()
+        {
+            var list = new List<BarShot>();
+            Action<string, FloatValues, bool> add = delegate(string name, FloatValues v, bool locked) { list.Add(new BarShot { Name = name, Values = v, Locked = locked }); };
+            add("reading", BarValues("reading", false), false);
+            add("reading-long", BarValues("reading", true), false);
+            add("paused", BarValues("paused", false), false);
+            // A not started session whose level is known shows "–" under the next level; without a known level that tile stays empty.
+            var idle = BarValues("idle", false);
+            idle.NextLabel = "Next level";
+            idle.NextValue = "–";
+            idle.NextIn = "–";
+            add("not-started", idle, false);
+            add("not-started-no-level", BarValues("idle", false), false);
+            var waiting = BarValues("waiting", false);
+            waiting.Clock = "";
+            waiting.NextLabel = null;
+            waiting.OutTitle = "Waiting";
+            waiting.OutNote = "Choosing a world and channel. Tempo starts counting when you’re in the game.";
+            add("waiting", waiting, false);
+            add("locked", BarValues("reading", false), true);
+            add("locked-long", BarValues("reading", true), true);
+            add("paused-long", BarValues("paused", true), false);
+            var first = BarValues("reading", false);
+            first.Clock = "";
+            add("reading-first-minute", first, false);
+            var firstLong = BarValues("reading", true);
+            firstLong.Clock = "";
+            add("reading-first-minute-long-map", firstLong, false);
+            return list;
+        }
+
+        /// <summary>
+        /// The bar's pictures: every state at its own width ("bar-&lt;state&gt;"); all on one sheet ("bar-states":
+        /// reading, the long map with large numbers, paused, not started, waiting, locked, each at least as wide as the
+        /// usual reading one, as the bar keeps its width while it shows); and the button that goes round, pointed at, with its
+        /// name card in each size ("cycle-small", "cycle-large", "cycle-bar") and four times as large ("cycle-button-zoom").
+        /// </summary>
+        private static void BarShots(string folder, string tail, float scale, bool light)
+        {
+            var locked = Texts.T("locked");
+            var bars = Bars();
+            foreach (var bar in bars)
+            {
+                var size = FloatPainter.MeasureBar(bar.Values, bar.Locked, locked, scale);
+                using (var bitmap = new Bitmap((int)Math.Round(size.Width * scale), (int)Math.Round(size.Height * scale), PixelFormat.Format32bppArgb))
+                {
+                    using (var g = Graphics.FromImage(bitmap)) FloatPainter.PaintBar(g, bar.Values, scale, null, light, bar.Locked, locked, size.Width);
+                    bitmap.Save(Path.Combine(folder, "bar-" + bar.Name + tail), ImageFormat.Png);
+                }
+            }
+            // The sheet: six states, one under the other, each at least as wide as the usual one.
+            var sheet = new[] { "reading", "reading-long", "paused", "not-started", "waiting", "locked" };
+            var least = FloatPainter.MeasureBar(bars[0].Values, false, locked, scale).Width;
+            var widths = new List<int>();
+            var widest = 0;
+            foreach (var name in sheet)
+            {
+                var bar = bars.Find(delegate(BarShot b) { return b.Name == name; });
+                var width = Math.Max(least, FloatPainter.MeasureBar(bar.Values, bar.Locked, locked, scale).Width);
+                widths.Add(width);
+                widest = Math.Max(widest, width);
+            }
+            const int pad = 16, gap = 14;
+            using (var bitmap = new Bitmap((int)Math.Round((widest + 2 * pad) * scale), (int)Math.Round((pad * 2 + sheet.Length * FloatPainter.BarHeight + (sheet.Length - 1) * gap) * scale), PixelFormat.Format32bppArgb))
+            {
+                using (var g = Graphics.FromImage(bitmap))
+                {
+                    g.Clear(light ? Color.FromArgb(0xdd, 0xe1, 0xe8) : Color.FromArgb(0x05, 0x06, 0x08));
+                    for (var i = 0; i < sheet.Length; i++)
+                    {
+                        var bar = bars.Find(delegate(BarShot b) { return b.Name == sheet[i]; });
+                        var state = g.Save();
+                        g.TranslateTransform((float)Math.Round(pad * scale), (float)Math.Round((pad + i * (FloatPainter.BarHeight + gap)) * scale));
+                        FloatPainter.PaintBar(g, bar.Values, scale, null, light, bar.Locked, locked, widths[i]);
+                        g.Restore(state);
+                    }
+                }
+                bitmap.Save(Path.Combine(folder, "bar-states" + tail), ImageFormat.Png);
+            }
+            // The button that goes round, pointed at, with the name of where a click goes, under it as FloatTip shows it.
+            var usual = BarValues("reading", false);
+            CycleShot(Path.Combine(folder, "cycle-small" + tail), usual, "small", scale, light);
+            CycleShot(Path.Combine(folder, "cycle-large" + tail), usual, "large", scale, light);
+            CycleShot(Path.Combine(folder, "cycle-bar" + tail), usual, "bar", scale, light);
+            var clock = BarValues("reading", true);
+            CycleShot(Path.Combine(folder, "cycle-small-long-clock" + tail), clock, "small", scale, light);
+            CycleShot(Path.Combine(folder, "cycle-small-paused" + tail), BarValues("paused", false), "small", scale, light);
+            if (scale == 1f) CycleZoom(Path.Combine(folder, "cycle-button-zoom" + tail), light);
+        }
+
+        /// <summary>The float or the bar in `size` with its button that goes round under the pointer, and the name card a moment later.</summary>
+        private static void CycleShot(string file, FloatValues v, string size, float scale, bool light)
+        {
+            var bar = size == "bar";
+            var locked = Texts.T("locked");
+            var measured = bar ? FloatPainter.MeasureBar(v, false, locked, scale) : FloatPainter.Measure(v, size == "small", Size.Empty);
+            var tipText = v.LabelOf(FloatPainter.NextSize(size));
+            var tip = FloatPainter.TipSize(tipText);
+            var extraWidth = 40;
+            var extraHeight = bar ? 34 : 0;
+            using (var bitmap = new Bitmap((int)Math.Round((measured.Width + extraWidth) * scale), (int)Math.Round((measured.Height + extraHeight) * scale), PixelFormat.Format32bppArgb))
+            {
+                using (var g = Graphics.FromImage(bitmap))
+                {
+                    g.Clear(light ? Color.FromArgb(0xdd, 0xe1, 0xe8) : Color.FromArgb(0x05, 0x06, 0x08));
+                    var state = g.Save();
+                    var hits = bar ? FloatPainter.PaintBar(g, v, scale, "size", light, false, locked, measured.Width) : FloatPainter.Paint(g, v, size == "small", scale, "size", 0, null, light, Size.Empty, false, null, locked);
+                    g.Restore(state);
+                    foreach (var problem in hits.Problems) Problems.Add("button that goes round, " + size + ": " + problem);
+                    var box = hits.Size;
+                    g.TranslateTransform((float)Math.Round(box.Left * scale), (float)Math.Round((box.Bottom + 4) * scale));
+                    FloatPainter.PaintTip(g, tipText, scale, light);
+                }
+                bitmap.Save(file, ImageFormat.Png);
+            }
+        }
+
+        /// <summary>The button that goes round, four times as large, in each of the three sizes.</summary>
+        private static void CycleZoom(string file, bool light)
+        {
+            const float zoom = 4f;
+            var t = Look.Of(light);
+            var sizes = new[] { "small", "large", "bar" };
+            const float cell = FloatPainter.CycleWidth + 4, gap = 10;
+            using (var bitmap = new Bitmap((int)Math.Round((sizes.Length * cell + (sizes.Length + 1) * gap) * zoom), (int)Math.Round((22 + 4 + 2 * gap) * zoom), PixelFormat.Format32bppArgb))
+            {
+                using (var g = Graphics.FromImage(bitmap))
+                {
+                    g.Clear(t.FloatFace);
+                    g.SmoothingMode = SmoothingMode.AntiAlias;
+                    g.PixelOffsetMode = PixelOffsetMode.Half;
+                    g.ScaleTransform(zoom, zoom);
+                    for (var i = 0; i < sizes.Length; i++) FloatPainter.CycleIcon(g, new RectangleF(gap + i * (cell + gap) + 2, gap + 2, FloatPainter.CycleWidth, 22), sizes[i], t);
+                }
+                bitmap.Save(file, ImageFormat.Png);
+            }
+        }
+
+        /// <summary>
+        /// The bar in every state, in each language's word for "locked", at the screen scales Windows offers most (100% to
+        /// 200%), locked and not, at its own width and wider (room before the buttons): nothing cut, nothing past its edge,
+        /// nothing to click while locked, the buttons inside it and apart. And the heads of the small and the large float
+        /// with the wider button that goes round, beside a long clock ("2:26:14") and beside "26:14" with "Paused".
+        /// </summary>
+        private static void BarSweep()
+        {
+            var kept = Texts.Language;
+            var seen = new HashSet<string>();
+            Action<string> problem = delegate(string text) { if (seen.Add(text)) Problems.Add(text); };
+            foreach (var language in Texts.Languages)
+            {
+                Texts.Language = language;
+                var word = Texts.T("locked");
+                foreach (var scale in new[] { 1f, 1.25f, 1.5f, 1.75f, 2f })
+                {
+                    foreach (var bar in Bars())
+                    {
+                        foreach (var locked in new[] { false, true })
+                        {
+                            var size = FloatPainter.MeasureBar(bar.Values, locked, word, scale);
+                            foreach (var more in new[] { 0, 80 })
+                            {
+                                var width = size.Width + more;
+                                var where = "bar " + bar.Name + (locked ? " locked" : "") + (more > 0 ? " widened" : "") + " (" + language + ") at " + (int)(scale * 100) + "%: ";
+                                if (size.Height != FloatPainter.BarHeight) problem(where + "it is " + size.Height + " tall");
+                                using (var bitmap = new Bitmap((int)Math.Round(width * scale), (int)Math.Round(size.Height * scale), PixelFormat.Format32bppArgb))
+                                using (var g = Graphics.FromImage(bitmap))
+                                {
+                                    var hits = FloatPainter.PaintBar(g, bar.Values, scale, null, false, locked, word, width);
+                                    foreach (var p in hits.Problems) problem(where + p);
+                                    var buttons = new[] { hits.Size, hits.Close, hits.Stop, hits.Start, hits.Reset };
+                                    if (locked)
+                                    {
+                                        foreach (var b in buttons) if (!b.IsEmpty) problem(where + "something can still be clicked");
+                                        continue;
+                                    }
+                                    if (hits.Size.IsEmpty || hits.Close.IsEmpty) problem(where + "the button that goes round or the cross is missing");
+                                    for (var i = 0; i < buttons.Length; i++)
+                                    {
+                                        var b = buttons[i];
+                                        if (b.IsEmpty) continue;
+                                        if (b.Left < 0 || b.Top < 0 || b.Right > width + 0.01f || b.Bottom > FloatPainter.BarHeight + 0.01f) problem(where + "a button lies outside it");
+                                        for (var j = i + 1; j < buttons.Length; j++) if (!buttons[j].IsEmpty && RectangleF.Intersect(b, buttons[j]).Width > 0.01f) problem(where + "two buttons lie over each other");
+                                    }
+                                    if (Math.Abs(hits.Close.Right - (width - 6)) > 0.01f) problem(where + "the cross is not at the right end");
+                                    var rounds = bar.Values.Out ? 0 : bar.Values.State == "paused" ? 2 : 1;
+                                    var found = (hits.Stop.IsEmpty ? 0 : 1) + (hits.Start.IsEmpty ? 0 : 1) + (hits.Reset.IsEmpty ? 0 : 1);
+                                    if (found != rounds) problem(where + found + " round buttons, not " + rounds);
+                                }
+                            }
+                        }
+                    }
+                    // The heads of the small and the large float beside the wider button: a long clock, and "26:14" with "Paused".
+                    foreach (var v in new[] { BarValues("reading", true), BarValues("paused", false), BarValues("paused", true), BarValues("idle", false) })
+                    {
+                        foreach (var small in new[] { true, false })
+                        {
+                            foreach (var locked in new[] { false, true })
+                            {
+                                var size = FloatPainter.Measure(v, small, Size.Empty, null, locked);
+                                using (var bitmap = new Bitmap((int)Math.Round(size.Width * scale), (int)Math.Round(size.Height * scale), PixelFormat.Format32bppArgb))
+                                using (var g = Graphics.FromImage(bitmap))
+                                {
+                                    var hits = FloatPainter.Paint(g, v, small, scale, "size", 0, null, false, Size.Empty, locked, null, word);
+                                    var where = (small ? "small" : "large") + " float, " + v.State + " " + v.Clock + (locked ? " locked" : "") + " (" + language + ") at " + (int)(scale * 100) + "%: ";
+                                    foreach (var p in hits.Problems) problem(where + p);
+                                    if (!locked && (hits.Size.Width != FloatPainter.CycleWidth || hits.Size.Right > hits.Close.Left + 0.01f || hits.Close.Right > size.Width)) problem(where + "the head's buttons do not fit");
+                                    // A paused float's head says "Paused" beside the clock: it has to be there whole.
+                                    if (small && !locked && v.State == "paused" && !HeadShowsPlace(g, v, hits)) problem(where + "\"" + v.Place + "\" has no room beside the clock");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Texts.Language = kept;
+        }
+
+        /// <summary>Whether the small float's head has room for the place beside the clock (FloatPainter draws it when 30 or more is left).</summary>
+        private static bool HeadShowsPlace(Graphics g, FloatValues v, FloatHits hits)
+        {
+            using (var ruler = new Bitmap(1, 1))
+            using (var r = Graphics.FromImage(ruler))
+            {
+                r.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+                var room = hits.Strip.Width - 6 - 24;
+                var clock = r.MeasureString(v.Clock, Look.Font(13f, 1), 600, StringFormat.GenericTypographic).Width + 1;
+                var place = r.MeasureString(v.Place, Look.Font(12f, 0), 600, StringFormat.GenericTypographic).Width;
+                return room - clock > 30 && room - clock - 7 >= place;
+            }
         }
 
         private static List<KeyValuePair<string, FloatValues>> Floats()

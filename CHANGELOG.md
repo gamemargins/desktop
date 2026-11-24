@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.1 (2026-11-25)
+
+- **The bar**, a third size of the float: one strip as tall as MapleStory's dashboard, the first time at the top of the
+  game in its middle, just under the title bar. At its left your session's time with the map under it (a long name
+  ends in "…"); then four tiles, EXP, mesos and kills an hour and the next level, with a thin blue line under the next
+  level that shows how far your level is; then the round buttons (Pause; once paused, Continue and Reset) and at the
+  right the size button and the cross. Large numbers make a tile wider, never cut off, and the bar keeps its width
+  while the numbers change. While you are not in the game it says **Waiting** with what it waits for on two lines.
+  Locked, it shows a small lock and "locked" where the buttons were. It does everything the float does: only above
+  MapleStory, hidden with it and back with it, moving along with the game's window, held anywhere but on a button,
+  light or dark as Windows is. It has a place of its own, and a drag sticks it to the game's middle as well as to its
+  edges; when it gets wider or narrower it keeps the side it sticks to, or stays in the middle.
+- **One button goes round the three sizes**: Small, Large, Bar, and Small again. It shows the three sizes as small
+  shapes with the one you have filled in, and when you rest the pointer on it it says where a click takes you.
+- Tempo's window shows its page also when the site sends it to the page in your language (gamemargins.com/nl/…), and
+  the program never opens that page in your browser. On a Windows in another language the window could stay empty
+  while the page opened in the browser.
+
 ## 0.4.0 (2026-11-24)
 
 GameMargins Desktop is for two games now, and it has one look.

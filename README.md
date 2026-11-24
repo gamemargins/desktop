@@ -39,7 +39,8 @@ autostart.
 - **Tempo for MapleStory Classic.** A window titled "Tempo" shows gamemargins.com's Tempo
   page; the program hands that page the picture of the MapleStory window, so no browser has to share a window. A small
   float stays on top of the game with your session's time, your numbers an hour and your monsters with their drops,
-  in two sizes; a click on it never takes the keyboard away from the game. **Start Tempo with MapleStory**, **Show
+  in three sizes: Small, Large, and a bar as tall as the game's dashboard, with one button that goes round them; a
+  click on it never takes the keyboard away from the game. **Start Tempo with MapleStory**, **Show
   the float** and **Lock the float (click through)** are in the Tempo window's own Settings.
 - **One window, a page per thing.** A list at the left: Overview, a page per game you use, and Settings at the foot
   with the version. Each page has one main button. Overview has a card per game with one line that says how it is
@@ -195,7 +196,7 @@ It runs as a normal user program and never asks for administrator rights.
 - `%LOCALAPPDATA%\GameMargins\Uploader\`:
   - `settings.json`: the site, your WoW folder, the language, the switches of Settings, which games you use, both
     protected tokens, whether you said yes to Tempo looking at the game's window, Tempo's own switches, where the
-    Tempo window and the float stood and the float's size, the version the program last updated itself to and when,
+    Tempo window, the float and the bar stood and the float's size, the version the program last updated itself to and when,
     a version that did not stay up, the newest version a "Version x.y.z is ready" notification announced,
     fingerprints of the files already uploaded and the last eight uploads for the window.
   - `GameMarginsDesktop-<version>.exe`: the versions the program installed itself. After an update the running one

@@ -1,8 +1,12 @@
-// Tempo's float: a small window that stays on top of the game, drawn by this program. Two sizes, switched with the
-// button next to the cross: large (the three numbers an hour, the level with its bar, the monsters, the row
-// "Picked up here" under them, and the buttons) and small (EXP, kills and mesos an hour, the next level, the round
-// button; no monsters, so no row either). Its head is the session's time as a stopwatch with the map beside it. Light
-// or dark as Windows is (Look.cs).
+// Tempo's float: a small window that stays on top of the game, drawn by this program. Three sizes, gone round with the
+// one button next to the cross (Small → Large → Bar → Small; its picture is three small shapes with the size you have
+// filled, its name card says where a click goes): large (the three numbers an hour, the level with its bar, the
+// monsters, the row "Picked up here" under them, and the buttons), small (EXP, kills and mesos an hour, the next
+// level, the round button; no monsters, so no row either) and the bar (from 0.4.1:
+// one strip 40 high, as tall as the game's dashboard, with the stopwatch and the map, the four numbers as tiles and
+// the round buttons; first at the top of the game in its middle, with a place of its own, and sticking to the game's
+// middle as well as to its edges). Its head is the session's time as a stopwatch with the map beside it. Light or
+// dark as Windows is (Look.cs).
 // The buttons work like a stopwatch: while Tempo reads there is only Pause; once paused, Continue and Reset (the words
 // come from the page).
 //
@@ -100,10 +104,18 @@ namespace GameMargins.Uploader
         public string Reset = "Reset";
         public string SmallLabel = "Small";
         public string LargeLabel = "Large";
+        /// <summary>The bar's name; a site from before the bar sends none, and then it is "Bar".</summary>
+        public string BarLabel = "Bar";
         public string CloseLabel = "Close";
 
         public bool HasNext { get { return NextLabel != null; } }
         public bool Out { get { return OutTitle != null; } }
+
+        /// <summary>The name of a size ("small", "large", "bar") as the page writes it.</summary>
+        public string LabelOf(string size)
+        {
+            return size == "small" ? SmallLabel : size == "bar" ? BarLabel : LargeLabel;
+        }
 
         public static FloatValues Parse(Dictionary<string, object> v)
         {
@@ -178,6 +190,7 @@ namespace GameMargins.Uploader
             {
                 f.SmallLabel = Cut(Json.Str(sizes, "small") ?? f.SmallLabel, 40);
                 f.LargeLabel = Cut(Json.Str(sizes, "large") ?? f.LargeLabel, 40);
+                f.BarLabel = Cut(Json.Str(sizes, "bar") ?? f.BarLabel, 40);
                 f.CloseLabel = Cut(Json.Str(sizes, "close") ?? f.CloseLabel, 40);
             }
             return f;
@@ -555,7 +568,7 @@ namespace GameMargins.Uploader
                 g.DrawLine(line, 0, Head, w, Head);
                 var reading = v.State == "reading";
                 using (var dot = new SolidBrush(reading ? t.Positive : t.Muted)) g.FillEllipse(dot, 10, (Head - 7) / 2f, 7, 7);
-                var headRight = w - 4 - 44;
+                var headRight = w - 4 - 22 - CycleWidth;
                 if (locked)
                 {
                     // Where the two buttons were: a small lock and the word. Nothing in a locked float can be clicked, so nothing looks as if it could.
@@ -571,7 +584,7 @@ namespace GameMargins.Uploader
                 else
                 {
                     hits.Close = new RectangleF(w - 4 - 22, 4, 22, 22);
-                    hits.Size = new RectangleF(w - 4 - 44, 4, 22, 22);
+                    hits.Size = new RectangleF(w - 4 - 22 - CycleWidth, 4, CycleWidth, 22);
                 }
                 var first = v.Out ? v.OutTitle : v.Clock.Length > 0 ? v.Clock : v.Place;
                 // The map stands beside the clock in the large size; the small one has room for a word ("Paused"), not for a map's name.
@@ -584,7 +597,7 @@ namespace GameMargins.Uploader
                 hits.Strip = new RectangleF(0, 0, headRight, Head);
                 if (!locked)
                 {
-                    IconButton(g, t, hits.Size, hot == "size", small ? "grow" : "shrink");
+                    CycleButton(g, t, hits.Size, hot == "size", small ? "small" : "large");
                     IconButton(g, t, hits.Close, hot == "close", "close");
                 }
 
@@ -942,6 +955,326 @@ namespace GameMargins.Uploader
             Icon(g, icon, new RectangleF(r.X + (r.Width - 12) / 2, r.Y + (r.Height - 12) / 2, 12, 12), hot ? t.Foreground : t.Muted);
         }
 
+        // ---- the button that goes round the three sizes: Small, then Large, then the bar, then Small again
+
+        /// <summary>How wide the button that goes round the sizes is, beside the cross of 22: room for its three small shapes.</summary>
+        public const float CycleWidth = 38f;
+
+        /// <summary>Where a click on that button goes: Small → Large → the bar → Small, one step a click.</summary>
+        public static string NextSize(string size)
+        {
+            return size == "small" ? "large" : size == "large" ? "bar" : "small";
+        }
+
+        private static void CycleButton(Graphics g, Palette t, RectangleF r, bool hot, string size)
+        {
+            if (hot)
+            {
+                using (var path = Look.Rounded(r, 4))
+                using (var back = new SolidBrush(t.Raised))
+                {
+                    g.FillPath(back, path);
+                }
+            }
+            CycleIcon(g, r, size, t);
+        }
+
+        /// <summary>
+        /// The picture on the button that goes round, for the size the float is in now (`size`: "small", "large" or "bar"),
+        /// drawn in the middle of the button's box.
+        /// The three sizes as three small shapes side by side in a strip of 33 × 12, in their proportions (Small 9 × 5 at 0,
+        /// Large 6 × 10 at 12, the bar 12 × 3 at 21; from 208 × 112, 280 × 470 and 553 × 40), each in the middle of the
+        /// strip's height, corners of 1. The size the float is in is filled in the text's colour (what is chosen); the other
+        /// two are a line of one pixel in the muted grey. The same picture in every size, only the filled shape differs. The
+        /// whole of that picture is here.
+        /// </summary>
+        public static void CycleIcon(Graphics g, RectangleF button, string size, Palette t)
+        {
+            var left = button.X + (button.Width - 33f) / 2;
+            var top = button.Y + (button.Height - 12f) / 2;
+            var names = new[] { "small", "large", "bar" };
+            var xs = new[] { 0f, 12f, 21f };
+            var widths = new[] { 9f, 6f, 12f };
+            var heights = new[] { 5f, 10f, 3f };
+            float scale;
+            for (var i = 0; i < 3; i++)
+            {
+                var box = Crisp(g, new RectangleF(left + xs[i], top + (12f - heights[i]) / 2, widths[i], heights[i]), out scale);
+                if (names[i] == size)
+                {
+                    using (var path = Look.Rounded(box, 1f))
+                    using (var fill = new SolidBrush(t.Foreground))
+                    {
+                        g.FillPath(fill, path);
+                    }
+                    continue;
+                }
+                // A line of one pixel inside the shape's box, whole pixels of the screen so it is sharp (two at 150% and more).
+                var stroke = Math.Max(1f, (float)Math.Round(scale)) / scale;
+                using (var ring = new GraphicsPath(FillMode.Alternate))
+                using (var muted = new SolidBrush(t.Muted))
+                {
+                    ring.AddPath(Look.Rounded(box, 1.5f), false);
+                    ring.AddPath(Look.Rounded(new RectangleF(box.X + stroke, box.Y + stroke, Math.Max(0.1f, box.Width - 2 * stroke), Math.Max(0.1f, box.Height - 2 * stroke)), 0.5f), false);
+                    g.FillPath(muted, ring);
+                }
+            }
+        }
+
+        /// <summary>`r` on whole pixels of the surface it is drawn on (the float is drawn scaled), so its edges are sharp; `scale` says how many of those pixels one of the float's is.</summary>
+        private static RectangleF Crisp(Graphics g, RectangleF r, out float scale)
+        {
+            float[] e;
+            using (var m = g.Transform) e = m.Elements;
+            float sx = e[0], sy = e[3], ox = e[4], oy = e[5];
+            scale = sx;
+            if (sx <= 0 || sy <= 0)
+            {
+                scale = 1f;
+                return r;
+            }
+            var x = (float)Math.Floor(r.X * sx + ox + 0.5f);
+            var y = (float)Math.Floor(r.Y * sy + oy + 0.5f);
+            var w = Math.Max(1f, (float)Math.Round(r.Width * sx));
+            var h = Math.Max(1f, (float)Math.Round(r.Height * sy));
+            return new RectangleF((x - ox) / sx, (y - oy) / sy, w / sx, h / sy);
+        }
+
+        // ---- the bar: tiles in one strip, as tall as the game's dashboard
+
+        /// <summary>The bar is as tall as the game's dashboard.</summary>
+        public const int BarHeight = 40;
+        private const float BarLeft = 10f, BarRight = 6f, BarGap = 12f;
+        /// <summary>The head's lines stand after the dot and its air; the map under the clock is at most this wide with that room, and cut with "…" past it.</summary>
+        private const float BarIndent = 14f, BarHeadMost = 150f;
+        /// <summary>The tiles' least widths (EXP, mesos and kills an hour, the next level), so the bar does not change its width with every number.</summary>
+        private static readonly float[] BarTileLeast = { 66f, 66f, 56f, 84f };
+
+        /// <summary>What the bar shows and how wide each part is, in the float's own measure as it is drawn at a scale.</summary>
+        private sealed class BarPlan
+        {
+            public string First = "", Second = "";
+            public bool FirstIsMap;
+            public float FirstWidth, SecondWidth, Head;
+            public string[] Note;
+            public float NoteWidth;
+            public FloatRow[] Cells;
+            public float[] Tiles;
+            /// <summary>Round buttons: pause while reading; play and reset while paused; play while not started; none while waiting or locked.</summary>
+            public int Rounds;
+            public float WordWidth, End, Width;
+        }
+
+        /// <summary>How wide `text` is in `font`, in the float's own measure, as it is drawn at `scale` (letters are fitted to the screen's pixels, so a width differs a little from scale to scale).</summary>
+        private static float TextWidth(string text, Font font, float scale)
+        {
+            if (string.IsNullOrEmpty(text)) return 0f;
+            lock (Ruler)
+            {
+                Ruler.ResetTransform();
+                Ruler.ScaleTransform(scale, scale);
+                try
+                {
+                    return Ruler.MeasureString(text, font, 4000, Near).Width;
+                }
+                finally
+                {
+                    Ruler.ResetTransform();
+                }
+            }
+        }
+
+        /// <summary>The waiting note on two lines: its first sentence, then the rest ("Choosing a world and channel." / "Tempo starts counting when you're in the game.").</summary>
+        internal static string[] NoteLines(string note)
+        {
+            note = (note ?? "").Trim();
+            for (var i = 0; i < note.Length - 1; i++)
+            {
+                var c = note[i];
+                var end = c == '。' || ((c == '.' || c == '!' || c == '?') && note[i + 1] == ' ');
+                if (!end) continue;
+                var rest = note.Substring(i + 1).Trim();
+                if (rest.Length > 0) return new[] { note.Substring(0, i + 1), rest };
+            }
+            return new[] { note };
+        }
+
+        private static BarPlan PlanBar(FloatValues v, bool locked, string lockedWord, float scale)
+        {
+            var p = new BarPlan();
+            if (v.Out) p.First = v.OutTitle ?? "";
+            else
+            {
+                p.First = v.Clock.Length > 0 ? v.Clock : v.Place;
+                p.Second = v.Clock.Length > 0 ? v.Place : "";
+                // The first minute of reading has no clock yet: the map stands in its place, cut as it is under a clock.
+                p.FirstIsMap = v.Clock.Length == 0 && v.State == "reading";
+            }
+            var most = BarHeadMost - BarIndent;
+            p.FirstWidth = TextWidth(p.First, F(13.5f, true), scale) + 1;
+            if (p.FirstIsMap) p.FirstWidth = Math.Min(most, p.FirstWidth);
+            p.SecondWidth = p.Second.Length > 0 ? Math.Min(most, TextWidth(p.Second, F(10.5f, false), scale) + 1) : 0;
+            p.Head = BarIndent + Math.Max(p.FirstWidth, p.SecondWidth);
+            float middle = 0;
+            if (v.Out)
+            {
+                // Not in the game: the note on two lines, never cut (the bar grows instead).
+                p.Note = NoteLines(v.OutNote);
+                foreach (var line in p.Note) p.NoteWidth = Math.Max(p.NoteWidth, TextWidth(line, F(11.5f, false), scale) + 1);
+                middle = p.NoteWidth;
+            }
+            else
+            {
+                p.Cells = new[]
+                {
+                    v.Rows.Count > 0 ? v.Rows[0] : new FloatRow(),
+                    v.Rows.Count > 1 ? v.Rows[1] : new FloatRow(),
+                    v.Rows.Count > 2 ? v.Rows[2] : new FloatRow(),
+                    v.HasNext ? new FloatRow { Label = v.NextLabel, Value = v.NextValue } : new FloatRow(),
+                };
+                p.Tiles = new float[4];
+                for (var i = 0; i < 4; i++)
+                {
+                    // A number wider than its tile makes the tile wider, and the bar with it: never cut.
+                    var need = Math.Max(TextWidth(p.Cells[i].Label, F(10.5f, false), scale), TextWidth(p.Cells[i].Value, F(13.5f, true), scale)) + 1;
+                    p.Tiles[i] = Math.Max(BarTileLeast[i], need);
+                    middle += p.Tiles[i] + (i > 0 ? BarGap : 0);
+                }
+            }
+            p.Rounds = locked || v.Out ? 0 : v.State == "paused" ? 2 : 1;
+            if (locked)
+            {
+                // Where the buttons were: a small lock and the word, as in the float's head.
+                p.WordWidth = string.IsNullOrEmpty(lockedWord) ? 0 : TextWidth(lockedWord, F(11.5f, false), scale) + 1;
+                p.End = 10 + (p.WordWidth > 0 ? 5 + p.WordWidth : 0) + 4;
+            }
+            else p.End = (p.Rounds > 0 ? p.Rounds * Button + (p.Rounds - 1) * 6 + BarGap : 0) + CycleWidth + 2 + 22;
+            // The head, its line, the tiles (or the note), the room that is left, the buttons: 12 between each.
+            p.Width = BarLeft + p.Head + BarGap + 1 + BarGap + middle + BarGap + BarGap + p.End + BarRight;
+            return p;
+        }
+
+        /// <summary>The bar's size in pixels at 96 dpi for what it shows, measured as it is drawn at `scale`: as wide as its parts, 40 tall.</summary>
+        public static Size MeasureBar(FloatValues v, bool locked, string lockedWord, float scale)
+        {
+            return new Size((int)Math.Ceiling(PlanBar(v, locked, lockedWord, scale).Width - 0.01f), BarHeight);
+        }
+
+        /// <summary>
+        /// Draws the bar at `scale` into a surface of `width` × 40 times that scale (`width` at least MeasureBar's: what is
+        /// more is room before the buttons, so the bar keeps its width while its words change). The head (the dot, the
+        /// stopwatch and under it the map, "Paused"; "Not started"; "Waiting"), a thin line, four tiles (a word over a
+        /// number; under the next level a line that measures the level), and at the right the round buttons, the button
+        /// that goes round and the cross. Locked: a lock and the word in their place. Waiting: the note on two lines in
+        /// place of the tiles, no round buttons.
+        /// </summary>
+        public static FloatHits PaintBar(Graphics g, FloatValues v, float scale, string hot, bool light, bool locked, string lockedWord, int width)
+        {
+            var t = Look.Of(light);
+            var hits = new FloatHits();
+            var p = PlanBar(v, locked, lockedWord, scale);
+            var w = Math.Max(width, (float)Math.Ceiling(p.Width - 0.01f));
+            float h = BarHeight;
+            using (var face = new SolidBrush(t.FloatFace)) g.FillRectangle(face, 0, 0, (float)Math.Ceiling(w * scale), (float)Math.Ceiling(h * scale));
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+            g.InterpolationMode = InterpolationMode.NearestNeighbor;
+            g.PixelOffsetMode = PixelOffsetMode.Half;
+            // Drawn in the float's own measure, then back to the surface's for the edge (a picture may have moved the surface).
+            var surface = g.Save();
+            g.ScaleTransform(scale, scale);
+            using (var fg = new SolidBrush(t.Foreground))
+            using (var muted = new SolidBrush(t.Muted))
+            using (var rule = new SolidBrush(t.Border))
+            {
+                var x = BarLeft;
+                // The head: the dot (green while Tempo reads) and the stopwatch; under it, small, the map or "Paused".
+                var two = p.Second.Length > 0;
+                var firstTop = two ? 4f : (h - 19) / 2;
+                using (var dot = new SolidBrush(v.State == "reading" && !v.Out ? t.Positive : t.Muted)) g.FillEllipse(dot, x, firstTop + 6, 7, 7);
+                BarText(g, p.First, F(13.5f, true), fg, x + BarIndent, firstTop, p.FirstWidth, 19, hits, p.FirstIsMap ? null : "the head");
+                if (two) BarText(g, p.Second, F(10.5f, false), muted, x + BarIndent, firstTop + 19, p.SecondWidth, 13, hits, v.State == "reading" ? null : "the head's second line");
+                x += p.Head + BarGap;
+                g.FillRectangle(rule, x, (h - 26) / 2, 1, 26);
+                x += 1 + BarGap;
+                if (v.Out)
+                {
+                    var top = p.Note.Length > 1 ? (h - 30) / 2 : (h - 15) / 2;
+                    for (var i = 0; i < p.Note.Length; i++) BarText(g, p.Note[i], F(11.5f, false), muted, x, top + i * 15, p.NoteWidth, 15, hits, "the waiting note");
+                    x += p.NoteWidth;
+                }
+                else
+                {
+                    for (var i = 0; i < 4; i++)
+                    {
+                        var tile = p.Tiles[i];
+                        BarText(g, p.Cells[i].Label, F(10.5f, false), muted, x, 4, tile, 13, hits, "a tile's word");
+                        BarText(g, p.Cells[i].Value, F(13.5f, true), fg, x, 17, tile, 19, hits, "a tile's number");
+                        // Under the next level: how far the level is, 2 px, 2 px above the edge.
+                        if (i == 3 && v.HasNext)
+                        {
+                            using (var track = new SolidBrush(t.Raised)) g.FillRectangle(track, x, h - 4, tile, 2);
+                            var done = (float)(tile * v.NextPercent / 100.0);
+                            if (done > 0) using (var blue = new SolidBrush(t.Measure)) g.FillRectangle(blue, x, h - 4, done, 2);
+                        }
+                        x += tile + (i < 3 ? BarGap : 0);
+                    }
+                }
+                // The right end stands at the bar's right; whatever room is left lies before it.
+                var end = w - BarRight - p.End;
+                if (end < x + 2 * BarGap - 0.5f) hits.Problems.Add("the bar's buttons lie over its numbers");
+                if (locked)
+                {
+                    Lock(g, new RectangleF(end, (h - 12) / 2, 10, 12), t.Muted);
+                    if (p.WordWidth > 0) BarText(g, lockedWord, F(11.5f, false), muted, end + 15, 0.5f, p.WordWidth, h, hits, "the word locked");
+                }
+                else
+                {
+                    var bx = end;
+                    var top = (h - Button) / 2;
+                    if (p.Rounds > 0)
+                    {
+                        if (v.State == "paused")
+                        {
+                            hits.Start = new RectangleF(bx, top, Button, Button);
+                            hits.Reset = new RectangleF(bx + Button + 6, top, Button, Button);
+                            RoundButton(g, t, hits.Start, hot == "start", "play");
+                            RoundButton(g, t, hits.Reset, hot == "reset", "reset");
+                        }
+                        else if (v.State == "idle")
+                        {
+                            hits.Start = new RectangleF(bx, top, Button, Button);
+                            RoundButton(g, t, hits.Start, hot == "start", "play");
+                        }
+                        else
+                        {
+                            hits.Stop = new RectangleF(bx, top, Button, Button);
+                            RoundButton(g, t, hits.Stop, hot == "stop", "pause");
+                        }
+                        bx += p.Rounds * Button + (p.Rounds - 1) * 6 + BarGap;
+                    }
+                    hits.Size = new RectangleF(bx, (h - 22) / 2, CycleWidth, 22);
+                    hits.Close = new RectangleF(bx + CycleWidth + 2, (h - 22) / 2, 22, 22);
+                    CycleButton(g, t, hits.Size, hot == "size", "bar");
+                    IconButton(g, t, hits.Close, hot == "close", "close");
+                    if (hits.Close.Right > w - BarRight + 0.5f) hits.Problems.Add("the cross passes the bar's edge");
+                }
+            }
+            hits.Strip = new RectangleF(0, 0, w, h);
+            g.Restore(surface);
+            // One thin edge all round, as the float has.
+            using (var edge = new Pen(t.FloatEdge, scale)) g.DrawRectangle(edge, 0.5f * scale, 0.5f * scale, (w - 1) * scale, (h - 1) * scale);
+            return hits;
+        }
+
+        /// <summary>One line of the bar in its box. `what` names it when it does not fit whole (null: it may end in "…", as the map does past 150).</summary>
+        private static void BarText(Graphics g, string text, Font font, Brush brush, float x, float y, float width, float height, FloatHits hits, string what)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            if (what != null && g.MeasureString(text, font, 4000, Near).Width > width + 0.25f) hits.Problems.Add(what + " is cut: " + text);
+            g.DrawString(text, font, brush, new RectangleF(x, y, width, height), Near);
+        }
+
         private static void TextButton(Graphics g, Palette t, RectangleF r, bool hot, string text)
         {
             using (var path = Look.Rounded(new RectangleF(r.X + 0.5f, r.Y + 0.5f, r.Width - 1, r.Height - 1), Look.Radius))
@@ -1151,7 +1484,16 @@ namespace GameMargins.Uploader
         private double _sessionNo = -1;
         private FloatValues _values = new FloatValues();
         private FloatHits _hits = new FloatHits();
-        private bool _small;
+        /// <summary>"small", "large" or "bar".</summary>
+        private string _size;
+        private bool Small { get { return _size == "small"; } }
+        private bool Bar { get { return _size == "bar"; } }
+        /// <summary>The bar is never narrower than it was this session (in the float's own measure): its buttons stay where they are while its words change.</summary>
+        private int _barLeast;
+        /// <summary>Where the float (small or large) and the bar last stood while this window was open: each has a place of its own. Empty until they did.</summary>
+        private Rectangle _floatWas, _barWas;
+        /// <summary>The bar was put at the screen's top for want of a game; it goes to the game's top the first time the game is there.</summary>
+        private bool _barWantsGame;
         private bool _locked;
         private float _scale = 1f;
         private string _hot;
@@ -1195,7 +1537,7 @@ namespace GameMargins.Uploader
         public Action<string> Command;
         /// <summary>The cross was pressed.</summary>
         public Action CloseAsked;
-        /// <summary>The size was switched to "small" or "large".</summary>
+        /// <summary>The size was switched to "small", "large" or "bar".</summary>
         public Action<string> SizeSwitched;
 
         protected override bool ShowWithoutActivation { get { return true; } }
@@ -1214,7 +1556,7 @@ namespace GameMargins.Uploader
         public FloatWindow(Settings settings, string origin)
         {
             _settings = settings;
-            _small = settings.FloatSize == "small";
+            _size = settings.FloatSize == "small" || settings.FloatSize == "bar" ? settings.FloatSize : "large";
             _user = ParseSize(settings.FloatLarge);
             _images = new FloatImages(origin, this);
             _images.Arrived = delegate { Invalidate(); };
@@ -1234,7 +1576,7 @@ namespace GameMargins.Uploader
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
         }
 
-        public string SizeName { get { return _small ? "small" : "large"; } }
+        public string SizeName { get { return _size; } }
 
         protected override void OnHandleCreated(EventArgs e)
         {
@@ -1251,44 +1593,103 @@ namespace GameMargins.Uploader
             _withGame.Start();
         }
 
-        /// <summary>Shows the float where it last stood on this arrangement of screens; the first time beside the game's window, else at the screen's top right.</summary>
+        /// <summary>
+        /// Shows the float where it last stood on this arrangement of screens; the first time beside the game's window, else
+        /// at the screen's top right. The bar has a place of its own: the first time at the top of the game's picture, in
+        /// the middle, just under its title bar.
+        /// </summary>
         public void ShowAt(Rectangle gameBounds)
         {
             if (!_placed)
             {
                 _placed = true;
-                var size = PixelSize();
-                Point topRight;
-                string kept;
-                if (_settings.FloatPlaces.TryGetValue(LayoutKey(), out kept) && TryPoint(kept, out topRight)) { }
-                else
-                {
-                    var area = Screen.PrimaryScreen.WorkingArea;
-                    topRight = new Point(area.Right - 16, area.Top + 16);
-                    if (!gameBounds.IsEmpty)
-                    {
-                        var screen = Screen.FromRectangle(gameBounds).WorkingArea;
-                        if (gameBounds.Right + 12 + size.Width <= screen.Right) topRight = new Point(gameBounds.Right + 12 + size.Width, Math.Max(screen.Top + 8, gameBounds.Top));
-                        else topRight = new Point(screen.Right - 16, screen.Top + 16);
-                    }
-                }
-                Bounds = Clamp(new Rectangle(topRight.X - size.Width, topRight.Y, size.Width, size.Height));
+                Bounds = Bar ? BarPlace() : FloatPlace(gameBounds);
             }
             if (!Visible) Show();
             Fit(false);
         }
 
+        /// <summary>Where the float (small or large) goes when it has not stood anywhere in this window yet: its kept place, else beside the game, else the screen's top right.</summary>
+        private Rectangle FloatPlace(Rectangle gameBounds)
+        {
+            var size = PixelSize();
+            Point topRight;
+            string kept;
+            if (_settings.FloatPlaces.TryGetValue(LayoutKey(), out kept) && TryPoint(kept, out topRight)) { }
+            else
+            {
+                var area = Screen.PrimaryScreen.WorkingArea;
+                topRight = new Point(area.Right - 16, area.Top + 16);
+                if (!gameBounds.IsEmpty)
+                {
+                    var screen = Screen.FromRectangle(gameBounds).WorkingArea;
+                    if (gameBounds.Right + 12 + size.Width <= screen.Right) topRight = new Point(gameBounds.Right + 12 + size.Width, Math.Max(screen.Top + 8, gameBounds.Top));
+                    else topRight = new Point(screen.Right - 16, screen.Top + 16);
+                }
+            }
+            return Clamp(new Rectangle(topRight.X - size.Width, topRight.Y, size.Width, size.Height));
+        }
+
+        /// <summary>Where the bar goes when it has not stood anywhere in this window yet: its kept place, else the top of the game's picture in the middle, else (no game yet) the top of the screen in the middle, until the game is there.</summary>
+        private Rectangle BarPlace()
+        {
+            var size = PixelSize();
+            string kept;
+            Rectangle at;
+            if (_settings.FloatBarPlaces.TryGetValue(LayoutKey(), out kept) && TryBarPlace(kept, size, out at)) return Clamp(at);
+            at = BarAtGame(Game(), size);
+            if (!at.IsEmpty) return Clamp(at);
+            _barWantsGame = true;
+            var area = Screen.PrimaryScreen.WorkingArea;
+            return Clamp(new Rectangle(area.Left + (area.Width - size.Width) / 2, area.Top, size.Width, size.Height));
+        }
+
+        /// <summary>The bar at the top of the game's picture (just under its title bar), in the middle; empty without a game.</summary>
+        private static Rectangle BarAtGame(IntPtr game, Size size)
+        {
+            if (game == IntPtr.Zero || IsIconic(game)) return Rectangle.Empty;
+            var picture = PictureOf(game);
+            if (picture.IsEmpty) return Rectangle.Empty;
+            return new Rectangle(picture.Left + picture.Width / 2 - size.Width / 2, picture.Top, size.Width, size.Height);
+        }
+
+        /// <summary>The bar's kept place, "x,y,side": x is its left edge, its right edge or its middle ("left", "right", "middle"), so the side it stuck to stays whatever its width is now.</summary>
+        private static bool TryBarPlace(string text, Size size, out Rectangle at)
+        {
+            at = Rectangle.Empty;
+            var parts = (text ?? "").Split(',');
+            int x, y;
+            if (parts.Length != 3 || !int.TryParse(parts[0], out x) || !int.TryParse(parts[1], out y)) return false;
+            var left = parts[2] == "left" ? x : parts[2] == "middle" ? x - size.Width / 2 : x - size.Width;
+            at = new Rectangle(left, y, size.Width, size.Height);
+            return true;
+        }
+
+        /// <summary>The bar's place as it is kept: by the side it sticks to (its middle on the game's, its left or its right), else by its right, as the float keeps its top right corner.</summary>
+        private string BarPlaceText(Rectangle r)
+        {
+            var xs = new List<int>();
+            var ys = new List<int>();
+            var mids = new List<int>();
+            Lines(r, Screen.FromRectangle(r).WorkingArea, 1, xs, ys, mids);
+            if (On(r.Left + r.Width / 2, mids)) return (r.Left + r.Width / 2) + "," + r.Top + ",middle";
+            if (On(r.Left, xs) && !On(r.Right, xs)) return r.Left + "," + r.Top + ",left";
+            return r.Right + "," + r.Top + ",right";
+        }
+
         public void SetValues(FloatValues values)
         {
-            var before = FloatPainter.Measure(_values, _small, _user, _folded, _locked);
+            var before = LogicalSize(_values);
             if (values.SessionNo != _sessionNo)
             {
                 _sessionNo = values.SessionNo;
                 _folded.Clear();
+                // A new session: the bar takes the width of what it shows again.
+                _barLeast = 0;
             }
             _values = values;
             if (_scroll > Math.Max(0, values.Monsters.Count - 1)) _scroll = 0;
-            if (!_resizing && FloatPainter.Measure(values, _small, _user, _folded, _locked) != before) Fit(false);
+            if (!_resizing && LogicalSize(values) != before) Fit(false);
             Invalidate();
         }
 
@@ -1341,30 +1742,47 @@ namespace GameMargins.Uploader
             Invalidate();
         }
 
+        /// <summary>The size of what `v` shows in the size the float is in, in pixels at 96 dpi; the bar never narrower than it was this session.</summary>
+        private Size LogicalSize(FloatValues v)
+        {
+            if (!Bar) return FloatPainter.Measure(v, Small, _user, _folded, _locked);
+            var bar = FloatPainter.MeasureBar(v, _locked, Texts.T("locked"), _scale);
+            return new Size(Math.Max(bar.Width, _barLeast), bar.Height);
+        }
+
         private Size PixelSize()
         {
-            var logical = FloatPainter.Measure(_values, _small, _user, _folded, _locked);
+            var logical = LogicalSize(_values);
             return new Size((int)Math.Round(logical.Width * _scale), (int)Math.Round(logical.Height * _scale));
         }
 
-        /// <summary>The window takes the size of what it shows; its top right corner stays where it is.</summary>
+        /// <summary>The window takes the size of what it shows, and keeps the side it sticks to.</summary>
         private void Fit(bool remember)
         {
+            if (Bar) _barLeast = LogicalSize(_values).Width;
             var size = PixelSize();
-            if (Size != size)
-            {
-                // The side that sticks to an edge (the game's or the screen's) stays on it, so a float against the game's
-                // right side stays against it when it turns small (the owner's test of 24 November 2026), and one on the
-                // game's bottom grows upward; otherwise its top right corner stays, as before.
-                var b = Bounds;
-                var xs = new List<int>();
-                var ys = new List<int>();
-                Lines(b, Screen.FromRectangle(b).WorkingArea, 1, xs, ys);
-                var left = On(b.Left, xs) && !On(b.Right, xs);
-                var bottom = On(b.Bottom, ys) && !On(b.Top, ys);
-                Bounds = Clamp(new Rectangle(left ? b.Left : b.Right - size.Width, bottom ? b.Bottom - size.Height : b.Top, size.Width, size.Height));
-            }
+            if (Size != size) Bounds = Clamp(Keep(Bounds, size));
             if (remember) Remember();
+        }
+
+        /// <summary>
+        /// `b` at a new size, with the side that sticks to an edge (the game's or the screen's) still on it: a float against
+        /// the game's right side stays against it when it turns small (the owner's test of 24 November 2026), one on the
+        /// game's bottom grows upward, and a bar in the middle of the game stays in the middle; otherwise the top right
+        /// corner stays, as before.
+        /// </summary>
+        private Rectangle Keep(Rectangle b, Size size)
+        {
+            var xs = new List<int>();
+            var ys = new List<int>();
+            var mids = Bar ? new List<int>() : null;
+            Lines(b, Screen.FromRectangle(b).WorkingArea, 1, xs, ys, mids);
+            var bottom = On(b.Bottom, ys) && !On(b.Top, ys);
+            int x;
+            if (mids != null && On(b.Left + b.Width / 2, mids)) x = b.Left + b.Width / 2 - size.Width / 2;
+            else if (On(b.Left, xs) && !On(b.Right, xs)) x = b.Left;
+            else x = b.Right - size.Width;
+            return new Rectangle(x, bottom ? b.Bottom - size.Height : b.Top, size.Width, size.Height);
         }
 
         private static bool On(int value, List<int> lines)
@@ -1471,6 +1889,17 @@ namespace GameMargins.Uploader
                 if (_hiddenWithGame) FadeIn();
                 if (!Visible) return;
                 Hook(game);
+                // A bar put at the screen's top for want of a game goes to the game's top the first time the game is there.
+                if (_barWantsGame)
+                {
+                    _barWantsGame = false;
+                    var at = Bar && !_dragging ? BarAtGame(game, Size) : Rectangle.Empty;
+                    if (!at.IsEmpty)
+                    {
+                        Bounds = Clamp(at);
+                        _gameWas = Rectangle.Empty;
+                    }
+                }
                 var frame = FrameOf(game);
                 if (!frame.IsEmpty)
                 {
@@ -1689,15 +2118,37 @@ namespace GameMargins.Uploader
             return near.IntersectsWith(me);
         }
 
-        /// <summary>The game's window moved or changed size: the float keeps its place to the game's nearer sides.</summary>
+        /// <summary>
+        /// The game's window moved or changed size: the float keeps its place to the game's nearer sides, and a bar in the
+        /// game's middle stays in its middle. Where the other kind (the float while the bar shows, or the bar while the float
+        /// does) last stood at the game moves along too, so it is back at the game when the button goes round to it.
+        /// </summary>
         private void Follow(Rectangle was, Rectangle now)
         {
+            var other = Bar ? _floatWas : _barWas;
+            if (!other.IsEmpty && AtGame(other, was))
+            {
+                var moved = Shifted(other, was, now, !Bar);
+                if (Bar) _floatWas = moved;
+                else _barWas = moved;
+            }
             var b = Bounds;
-            var dx = b.Left + b.Width / 2 > was.Left + was.Width / 2 ? now.Right - was.Right : now.Left - was.Left;
-            var dy = b.Top + b.Height / 2 > was.Top + was.Height / 2 ? now.Bottom - was.Bottom : now.Top - was.Top;
-            if (dx == 0 && dy == 0) return;
-            Location = new Point(b.X + dx, b.Y + dy);
+            var to = Shifted(b, was, now, Bar);
+            if (to.Location == b.Location) return;
+            Location = to.Location;
             _followed = true;
+        }
+
+        /// <summary>`b` moved as the game's window moved from `was` to `now`: by the nearer sides; a bar (`bar`) whose middle is the game's middle by the middle.</summary>
+        private static Rectangle Shifted(Rectangle b, Rectangle was, Rectangle now, bool bar)
+        {
+            var middle = was.Left + was.Width / 2;
+            int dx;
+            if (bar && Math.Abs(b.Left + b.Width / 2 - middle) <= 2) dx = now.Left + now.Width / 2 - middle;
+            else dx = b.Left + b.Width / 2 > middle ? now.Right - was.Right : now.Left - was.Left;
+            var dy = b.Top + b.Height / 2 > was.Top + was.Height / 2 ? now.Bottom - was.Bottom : now.Top - was.Top;
+            b.Offset(dx, dy);
+            return b;
         }
 
         /// <summary>
@@ -1711,12 +2162,17 @@ namespace GameMargins.Uploader
             var reach = (int)Math.Round(SnapReach * _scale);
             var xs = new List<int>();
             var ys = new List<int>();
-            Lines(new Rectangle(want, size), Screen.FromPoint(Cursor.Position).WorkingArea, reach, xs, ys);
-            return new Point(Nearest(want.X, size.Width, xs, reach), Nearest(want.Y, size.Height, ys, reach));
+            // The bar also sticks with its middle to the game's middle.
+            var mids = Bar ? new List<int>() : null;
+            Lines(new Rectangle(want, size), Screen.FromPoint(Cursor.Position).WorkingArea, reach, xs, ys, mids);
+            return new Point(Nearest(want.X, size.Width, xs, reach, mids), Nearest(want.Y, size.Height, ys, reach, null));
         }
 
-        /// <summary>The lines the float sticks to: the screen's work area, and the game's frame and picture where `me` is beside them (within `reach`).</summary>
-        private void Lines(Rectangle me, Rectangle area, int reach, List<int> xs, List<int> ys)
+        /// <summary>
+        /// The lines the float sticks to: the screen's work area, and the game's frame and picture where `me` is beside them
+        /// (within `reach`); in `mids` (when asked) the middles of the game's frame and picture, for the bar.
+        /// </summary>
+        private void Lines(Rectangle me, Rectangle area, int reach, List<int> xs, List<int> ys, List<int> mids)
         {
             xs.Add(area.Left);
             xs.Add(area.Right);
@@ -1731,6 +2187,7 @@ namespace GameMargins.Uploader
                 {
                     xs.Add(r.Left);
                     xs.Add(r.Right);
+                    if (mids != null) mids.Add(r.Left + r.Width / 2);
                 }
                 if (me.Right >= r.Left - reach && me.Left <= r.Right + reach)
                 {
@@ -1740,11 +2197,23 @@ namespace GameMargins.Uploader
             }
         }
 
-        /// <summary>`start` moved so that its start or its end is on the nearest line within `reach`; else as it is.</summary>
-        private static int Nearest(int start, int length, List<int> lines, int reach)
+        /// <summary>`start` moved so that its start or its end is on the nearest line within `reach`, or its middle on one of `mids`; else as it is.</summary>
+        private static int Nearest(int start, int length, List<int> lines, int reach, List<int> mids)
         {
             var best = start;
             var gap = reach + 1;
+            if (mids != null)
+            {
+                foreach (var mid in mids)
+                {
+                    var c = Math.Abs(start + length / 2 - mid);
+                    if (c < gap)
+                    {
+                        gap = c;
+                        best = mid - length / 2;
+                    }
+                }
+            }
             foreach (var line in lines)
             {
                 var a = Math.Abs(start - line);
@@ -1763,16 +2232,49 @@ namespace GameMargins.Uploader
             return best;
         }
 
+        /// <summary>Keeps the size and the place: the float's top right corner, or the bar's side; and where the other kind last stood in this window, should it have moved along with the game.</summary>
         private void Remember()
         {
-            _settings.FloatPlaces[LayoutKey()] = Right + "," + Top;
+            var key = LayoutKey();
+            var me = Bounds;
+            var floatAt = Bar ? _floatWas : me;
+            var barAt = Bar ? me : _barWas;
+            if (!floatAt.IsEmpty) _settings.FloatPlaces[key] = floatAt.Right + "," + floatAt.Top;
+            if (!barAt.IsEmpty) _settings.FloatBarPlaces[key] = BarPlaceText(barAt);
             _settings.FloatSize = SizeName;
             _settings.Save();
         }
 
+        /// <summary>
+        /// The button that goes round: Small → Large → the bar → Small. Small and large share a place and switch keeping the
+        /// side they stick to, as before; the bar has a place of its own, so going to it or back from it puts the window where
+        /// that kind last stood (its side kept), else where it is kept, else at its first place.
+        /// </summary>
+        private void SwitchTo(string size)
+        {
+            if (size == _size) return;
+            NoTip();
+            _hot = null;
+            var wasBar = Bar;
+            if (wasBar) _barWas = Bounds;
+            else _floatWas = Bounds;
+            _size = size;
+            if (Bar) _barLeast = 0;
+            if (wasBar != Bar)
+            {
+                var back = Bar ? _barWas : _floatWas;
+                var game = Game();
+                Bounds = !back.IsEmpty ? Clamp(Keep(back, PixelSize())) : Bar ? BarPlace() : FloatPlace(game != IntPtr.Zero ? FrameOf(game) : Rectangle.Empty);
+            }
+            Fit(true);
+            Invalidate();
+            if (SizeSwitched != null) SizeSwitched(SizeName);
+        }
+
         protected override void OnPaint(PaintEventArgs e)
         {
-            _hits = FloatPainter.Paint(e.Graphics, _values, _small, _scale, _hot, _scroll, _images, Look.IsLight, _user, _locked, _folded, Texts.T("locked"));
+            if (Bar) _hits = FloatPainter.PaintBar(e.Graphics, _values, _scale, _hot, Look.IsLight, _locked, Texts.T("locked"), LogicalSize(_values).Width);
+            else _hits = FloatPainter.Paint(e.Graphics, _values, Small, _scale, _hot, _scroll, _images, Look.IsLight, _user, _locked, _folded, Texts.T("locked"));
         }
 
         protected override void OnPaintBackground(PaintEventArgs e)
@@ -1782,7 +2284,7 @@ namespace GameMargins.Uploader
         private string Under(Point pixel)
         {
             var p = new PointF(pixel.X / (_scale * _hits.Zoom), pixel.Y / (_scale * _hits.Zoom));
-            if (!_small && !_hits.Grip.IsEmpty && _hits.Grip.Contains(p)) return "grip";
+            if (_size == "large" && !_hits.Grip.IsEmpty && _hits.Grip.Contains(p)) return "grip";
             if (_hits.Close.Contains(p)) return "close";
             if (_hits.Size.Contains(p)) return "size";
             if (!_hits.Stop.IsEmpty && _hits.Stop.Contains(p)) return "stop";
@@ -1807,6 +2309,8 @@ namespace GameMargins.Uploader
             }
             if (Under(e.Location) != "strip") return;
             _dragging = true;
+            // Held by the player: it stays where they put it.
+            _barWantsGame = false;
             _dragFrom = e.Location;
             Capture = true;
         }
@@ -1835,9 +2339,11 @@ namespace GameMargins.Uploader
             }
             // What the pointer rests on says its name after a moment: an item's picture, or a button without words.
             var p = new PointF(e.X / (_scale * _hits.Zoom), e.Y / (_scale * _hits.Zoom));
-            string tip = hot == "close" ? _values.CloseLabel : hot == "size" ? (_small ? _values.LargeLabel : _values.SmallLabel) : hot == "stop" && _small ? _values.Stop : hot == "start" && _small ? _values.Start : hot == "reset" && _small ? _values.Reset : null;
+            // The button that goes round says where a click goes: the next size's name. The round buttons (small and bar) say their word.
+            var round = _size != "large";
+            string tip = hot == "close" ? _values.CloseLabel : hot == "size" ? _values.LabelOf(FloatPainter.NextSize(_size)) : hot == "stop" && round ? _values.Stop : hot == "start" && round ? _values.Start : hot == "reset" && round ? _values.Reset : null;
             var box = hot == "close" ? _hits.Close : hot == "size" ? _hits.Size : hot == "stop" ? _hits.Stop : hot == "start" ? _hits.Start : hot == "reset" ? _hits.Reset : RectangleF.Empty;
-            if (tip == null && !_small)
+            if (tip == null && _size == "large")
             {
                 foreach (var one in _hits.Tips)
                 {
@@ -1924,11 +2430,7 @@ namespace GameMargins.Uploader
                     if (CloseAsked != null) BeginInvoke(new Action(delegate { if (CloseAsked != null) CloseAsked(); }));
                     break;
                 case "size":
-                    _small = !_small;
-                    _hot = null;
-                    Fit(true);
-                    Invalidate();
-                    if (SizeSwitched != null) SizeSwitched(SizeName);
+                    SwitchTo(FloatPainter.NextSize(_size));
                     break;
                 case "stop":
                     if (Command != null) Command("stop");
@@ -1945,7 +2447,7 @@ namespace GameMargins.Uploader
         protected override void OnMouseWheel(MouseEventArgs e)
         {
             base.OnMouseWheel(e);
-            if (_small || _hits.MonstersShown == 0) return;
+            if (_size != "large" || _hits.MonstersShown == 0) return;
             var most = _hits.ScrollMost;
             var next = Math.Max(0, Math.Min(most, _scroll + (e.Delta < 0 ? 1 : -1)));
             if (next == _scroll) return;
