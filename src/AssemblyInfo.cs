@@ -11,7 +11,7 @@ using GameMargins.Uploader;
 [assembly: AssemblyTitle("GameMargins Desktop")]
 [assembly: AssemblyProduct("GameMargins Desktop")]
 [assembly: AssemblyCompany("GameMargins")]
-[assembly: AssemblyDescription("Uploads the GameMargins addon's WoW: Forever auction house scans to gamemargins.com and keeps the addon and itself up to date.")]
+[assembly: AssemblyDescription("GameMargins for WoW: Forever (uploads the addon's auction house scans, keeps the addon up to date) and MapleStory Classic (Tempo, the tracker); keeps itself up to date.")]
 [assembly: AssemblyCopyright("© 2026 GameMargins")]
 [assembly: AssemblyVersion(Program.Version + ".0")]
 [assembly: AssemblyFileVersion(Program.Version + ".0")]

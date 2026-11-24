@@ -1,21 +1,19 @@
-// The program's face: once linked it lives by the clock with the site's mark as its icon; a left click opens the small
-// window (per WoW account the status, the addon, the last uploads, "Upload now", the line about the next upload), a
-// right click the menu (TrayMenu.cs: Upload now, Open gamemargins.com, Start with Windows, Keep the addon up to date,
-// Keep the program up to date, Quit, and "Update to x.y.z" on top while a newer version waits for a click); a
-// notification follows each upload, a Windows toast that stays in the notification center (Toasts.cs; the balloon tips
-// were lost to Do not disturb), and for ten minutes after a stored scan the tray icon carries a green check with
-// "Uploaded 3 min ago · 240,910 auctions" as its tooltip (TrayBadge.cs), which names the program's version otherwise
-// ("GameMargins Desktop 0.2.5"). The program's own update (Updater.cs) is driven from here: the checks, the menu's
-// offer, and the hand-over to the new exe once no upload is under way. Before it is linked, the window shows the link card (a
-// code, "Open gamemargins.com/link", waiting). Colours as the site's rules have them: gold only for the button and the
-// brand, orange for watch out (a skipped scan, no folder), red for a failure, blue for information, grey for
-// structure; "uploaded" is plain text in the window, and the check is green because green means done.
+// The program's window and its life by the clock. Once set up the program lives by the clock with the site's mark as
+// its icon: a left click opens the window, a right click the short menu (TrayMenu.cs). The window
+// is a list at the left like Tempo's: Overview, MapleStory Classic, WoW: Forever, Settings, with
+// the page that is picked at the right (MainViews.cs draws them; a game the program is not used for has no line). A
+// first start is one thing a screen: your language, your games, the link (one gold button that opens the site with the
+// code filled in), and the question "May Tempo look at your MapleStory window?"; with WoW: Forever too, its link is a
+// step of its own in between. A notification comes only when the player has to do something (ToastTexts.cs); an upload
+// that went well shows on the icon (a green check for ten minutes, TrayBadge.cs) and in the window. The program keeps
+// itself up to date (Updater.cs) and says so afterwards in one quiet line on Overview. This file holds what the
+// program does: linking, uploading, the addon, the update, the icon and its menu. Colours as the site's rules have
+// them, in Windows' light or dark mode (Look.cs).
 
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -25,25 +23,8 @@ using Microsoft.Win32;
 
 namespace GameMargins.Uploader
 {
-    internal sealed class MainForm : Form
+    internal sealed partial class MainForm : Form
     {
-        private static readonly Color Background = Color.FromArgb(0x12, 0x14, 0x18);
-        private static readonly Color Surface = Color.FromArgb(0x1a, 0x1d, 0x23);
-        private static readonly Color Border = Color.FromArgb(0x2a, 0x2e, 0x36);
-        private static readonly Color Foreground = Color.FromArgb(0xe8, 0xea, 0xf0);
-        private static readonly Color Muted = Color.FromArgb(0x9a, 0xa3, 0xb2);
-        private static readonly Color Accent = Color.FromArgb(0xf5, 0xb8, 0x3d);
-        private static readonly Color OnAccent = Color.FromArgb(0x14, 0x14, 0x14);
-        private static readonly Color Warning = Color.FromArgb(0xf0, 0x8a, 0x24);
-        private static readonly Color Negative = Color.FromArgb(0xe5, 0x48, 0x4d);
-        private static readonly Color Info = Color.FromArgb(0x39, 0x87, 0xe5);
-
-        private static readonly Font Body = new Font("Segoe UI", 10F);
-        private static readonly Font Small = new Font("Segoe UI", 9F);
-        private static readonly Font Heading = new Font("Segoe UI", 8.5F, FontStyle.Bold);
-        private static readonly Font Strong = new Font("Segoe UI", 10.5F, FontStyle.Bold);
-        private static readonly Font Code = new Font("Consolas", 26F);
-
         private const string Title = "GameMargins Desktop";
         private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
         /// <summary>The Run value's name, kept from the program's old name (GameMargins Uploader) so autostart stays one entry.</summary>
@@ -55,6 +36,10 @@ namespace GameMargins.Uploader
         private const int BadgeMinutes = 10;
         /// <summary>NotifyIcon.Text holds no more than this.</summary>
         private const int TrayTextMax = 63;
+        /// <summary>How long Overview says "Updated to x" after the program updated itself.</summary>
+        private const int UpdatedNoteDays = 3;
+        /// <summary>The window's inside, in pixels at 96 dpi; it is not resized, so nothing is ever cut off or scrolls sideways.</summary>
+        internal const int ViewWidth = 660, ViewHeight = 440;
 
         private readonly Settings _settings;
         private readonly Api _api;
@@ -64,6 +49,8 @@ namespace GameMargins.Uploader
         private readonly Icon _trayIcon;
         /// <summary>The same icon with the green check (TrayBadge), for the ten minutes after a stored scan.</summary>
         private readonly Icon _trayIconOk;
+        /// <summary>The tray icon with a green dot, while Tempo watches the game's window.</summary>
+        private readonly Icon _trayIconDot;
         private readonly System.Windows.Forms.Timer _pollTimer = new System.Windows.Forms.Timer();
         private readonly System.Windows.Forms.Timer _clock = new System.Windows.Forms.Timer();
         private readonly System.Windows.Forms.Timer _maintain = new System.Windows.Forms.Timer();
@@ -76,25 +63,33 @@ namespace GameMargins.Uploader
         private readonly Updater _updater;
         /// <summary>The exe this copy replaced, when an update started it (--updated-from); null otherwise.</summary>
         private readonly string _updatedFrom;
+        /// <summary>Made for a picture (Shots.cs): no icon by the clock, nothing asked of the site, no window shown.</summary>
+        private readonly bool _shots;
 
-        private Panel _root;
-        private FlowLayoutPanel _accountsPanel;
-        private Label _addonLabel;
-        private TableLayoutPanel _uploadsTable;
-        private Label _resultLabel;
-        private Label _updateLabel;
-        private Label _folderLabel;
-        private Button _uploadButton;
-        private Label _codeLabel;
-        private Label _waitingLabel;
-        private Button _openLinkButton;
-        private Button _copyLinkButton;
-        private readonly Dictionary<int, Label> _statusLabels = new Dictionary<int, Label>();
+        private readonly UiCanvas _canvas = new UiCanvas();
+        /// <summary>Tempo's side (MapleStory Classic): its link, its window, its float.</summary>
+        private readonly Tempo _tempo;
+
+        // What the window shows, kept as plain words and tones ("", "muted", "warning", "negative", "info"): the pages are drawn from these.
+        private string _page = "overview";
+        private bool _gamesEdit;
+        private bool _tickMaple, _tickWow;
+        private bool _askAgain;
+        private bool _unlinkAsk;
+        private string _linkNotice;
+        private string _waitText = "";
+        private string _waitTone = "";
+        private string _result = "";
+        private string _resultTone = "muted";
+        private string _addonText;
+        private string _addonTone = "";
+        private readonly Dictionary<int, string[]> _accountStatus = new Dictionary<int, string[]>();
+        private DateTime _copiedAt = DateTime.MinValue;
+        private bool _lastUploadFailed;
+        private bool _wowBegun;
 
         private bool _allowVisible;
         private bool _quitting;
-        private bool _hiddenOnce;
-        private bool _mainView;
         private LinkStart _link;
         private bool _polling;
         private int _codeRenewals;
@@ -105,8 +100,9 @@ namespace GameMargins.Uploader
         private readonly HashSet<int> _inFlight = new HashSet<int>();
         private readonly HashSet<int> _again = new HashSet<int>();
         private int _uploadsRunning;
-        /// <summary>A folder picker or message box is open: the hand-over to a new exe waits for it.</summary>
+        /// <summary>A folder picker is open: the hand-over to a new exe waits for it.</summary>
         private bool _dialogOpen;
+        private bool _tempoDirty;
 
         /// <summary>A newer version waiting for the player's click ("Keep the program up to date" off); null when there is none.</summary>
         private ProgramRelease _offered;
@@ -116,45 +112,67 @@ namespace GameMargins.Uploader
         /// <summary>The checked new exe this copy hands over to once nothing is under way, and for which version; null before.</summary>
         private string _handOverTo;
         private ProgramRelease _handOverRelease;
-        /// <summary>Whether that update came from a click on "Update to x.y.z", which doesn't wait for an open window.</summary>
+        /// <summary>Whether that update came from a click on "Update now", which doesn't wait for the window to be closed.</summary>
         private bool _handOverClicked;
+        /// <summary>The site was asked for its newest version and answered: the list's foot may say "up to date".</summary>
+        private bool _checked;
 
-        public MainForm(Settings settings, string updatedFrom)
+        public MainForm(Settings settings, string updatedFrom) : this(settings, updatedFrom, false)
+        {
+        }
+
+        public MainForm(Settings settings, string updatedFrom, bool shots)
         {
             _settings = settings;
             _updatedFrom = updatedFrom;
+            _shots = shots;
             _api = new Api(settings.Site);
             _addon = new Addon(_api) { KeepUpdated = settings.KeepAddonUpdated };
             _addon.Changed += OnAddonChanged;
             _updater = new Updater(new HttpUpdateWeb(), Settings.Folder, Program.Version);
+            _tempo = new Tempo(settings, _api);
+            _tempo.WindowVisible = delegate { return Visible; };
+            _tempo.Changed = OnTempoChanged;
+            // Unlinked on the site: the one thing of Tempo the player has to do something about, so it is said by the clock too.
+            _tempo.Attention = delegate
+            {
+                Notify(ToastTexts.Unlinked(), "unlinked", ToolTipIcon.Warning, 8000);
+                ShowWindow();
+            };
+            _tempo.FirstLink = FirstLink;
+            _tickMaple = settings.Maple;
+            _tickWow = settings.Wow && settings.GamesAsked;
 
             Text = Title;
-            BackColor = Background;
-            ForeColor = Foreground;
-            Font = Body;
+            BackColor = Look.Now.Background;
             FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            AutoScaleMode = AutoScaleMode.Dpi;
-            AutoScaleDimensions = new SizeF(96F, 96F);
-            ClientSize = new Size(620, 600);
+            AutoScaleMode = AutoScaleMode.None;
+            ClientSize = new Size(ViewWidth, ViewHeight);
             Icon = LoadIcon(32);
+            _canvas.Dock = DockStyle.Fill;
+            _canvas.Render = Draw;
+            Controls.Add(_canvas);
+            if (shots) return;
 
+            Look.Changed += OnLookChanged;
             var traySize = SystemInformation.SmallIconSize.Width;
             _trayIcon = LoadIcon(traySize);
             try { _trayIconOk = TrayBadge.WithCheck(_trayIcon, traySize); } catch (Exception) { _trayIconOk = _trayIcon; }
+            try { _trayIconDot = TrayBadge.WithDot(_trayIcon, traySize); } catch (Exception) { _trayIconDot = _trayIcon; }
             _tray = new NotifyIcon { Icon = _trayIcon, Text = Title, Visible = true };
             _tray.MouseClick += delegate(object s, MouseEventArgs e) { if (e.Button == MouseButtons.Left) ShowWindow(); };
             _tray.DoubleClick += delegate { ShowWindow(); };
             _tray.BalloonTipClicked += delegate { ShowWindow(); };
-            BuildTrayMenu();
+            _tray.ContextMenuStrip = TrayMenu.Make(TrayLines);
             RefreshTray();
 
             _pollTimer.Tick += async delegate { await PollOnce(); };
             _clock.Interval = 60000;
             _clock.Tick += delegate
             {
-                RenderUploads();
+                Repaint();
                 RefreshTray();
             };
             _clock.Start();
@@ -184,12 +202,12 @@ namespace GameMargins.Uploader
             _handOver.Tick += delegate { HandOverWhenIdle(); };
 
             _scanner.FileWritten += async delegate(WowAccount account) { await UploadAccount(account, false); };
-            _scanner.AccountsChanged += delegate { RenderAccounts(); };
+            _scanner.AccountsChanged += delegate { Repaint(); };
 
             FormClosing += OnClosing;
 
-            // The window exists from the start (timers, Invoke) but shows only when something asks for it: a linked program
-            // starts by the clock, an unlinked one shows the link card.
+            // The window exists from the start (timers, Invoke) but shows only when something asks for it: a program that
+            // is set up starts by the clock, one that is not shows the step that is open.
             CreateHandle();
             BeginInvoke(new Action(async delegate { await Begin(); }));
         }
@@ -200,10 +218,71 @@ namespace GameMargins.Uploader
             base.SetVisibleCore(_allowVisible && value);
         }
 
+        /// <summary>A test start that opens Tempo by itself shows its windows without taking the keyboard.</summary>
+        protected override bool ShowWithoutActivation
+        {
+            get { return Program.TestOpen; }
+        }
+
+        // ------------------------------------------------------------------------------------------------ the window's size and mode
+
+        [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr h);
+        [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int height, uint flags);
+
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
-            DarkTitleBar();
+            Look.TitleBar(Handle);
+            var zoom = 1f;
+            try { zoom = Math.Max(1f, GetDpiForWindow(Handle) / 96f); } catch (Exception) { }
+            Zoom(zoom);
+        }
+
+        /// <summary>The window at the screen's scale: the same page, every size times `zoom`.</summary>
+        private void Zoom(float zoom)
+        {
+            _canvas.Zoom = zoom;
+            ClientSize = new Size((int)Math.Round(ViewWidth * zoom), (int)Math.Round(ViewHeight * zoom));
+            _canvas.Invalidate();
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (Look.IsColourChange(ref m)) Look.Refresh();
+            // Moved to a screen with another scale: Windows names the new scale; the window keeps its place and takes the size that fits its page.
+            if (m.Msg == 0x02E0)
+            {
+                Zoom(Math.Max(1f, (m.WParam.ToInt64() & 0xFFFF) / 96f));
+                return;
+            }
+            base.WndProc(ref m);
+        }
+
+        /// <summary>Windows switched between light and dark: the window, the float and the menu follow at once.</summary>
+        private void OnLookChanged()
+        {
+            if (_quitting || IsDisposed) return;
+            // Windows may say so on a thread of its own: the window is touched on its own thread only.
+            if (InvokeRequired)
+            {
+                try { BeginInvoke(new Action(OnLookChanged)); } catch (Exception) { }
+                return;
+            }
+            try
+            {
+                BackColor = Look.Now.Background;
+                if (IsHandleCreated) Look.TitleBar(Handle);
+                _canvas.Invalidate();
+                _tempo.LookChanged();
+            }
+            catch (Exception) { }
+        }
+
+        private void Repaint()
+        {
+            if (_quitting || IsDisposed) return;
+            Settle();
+            _canvas.Invalidate();
         }
 
         /// <summary>A second start of the exe sets this signal; the running copy answers by showing its window.</summary>
@@ -240,17 +319,70 @@ namespace GameMargins.Uploader
             try { return Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch (Exception) { return SystemIcons.Application; }
         }
 
+        // ------------------------------------------------------------------------------------------------ which screen
+
+        /// <summary>
+        /// What the window shows: "language" (a first start's first step: which language?), "games" (which games?), "link-maple" or "link-wow" (a code to link with), "ask" (may
+        /// Tempo look?), or "main" (the list and its pages). A step shows as long as it is open; "No, not now" leaves
+        /// the question for later (MapleStory's page and Settings lead back to it). A Windows that can't look at a
+        /// window is never asked the question.
+        /// </summary>
+        private string Stage()
+        {
+            if (!_settings.LanguageAsked && !_settings.GamesAsked && !_gamesEdit) return "language";
+            if (!_settings.GamesAsked || _gamesEdit) return "games";
+            if (_settings.Maple && _tempo.SiteAllowed && !_tempo.Linked) return "link-maple";
+            if (_settings.Wow && string.IsNullOrEmpty(_settings.Token)) return "link-wow";
+            if (_settings.Maple && _tempo.Linked && !TempoShut && !_tempo.Consent && (!_settings.TempoAsked || _askAgain)) return "ask";
+            return "main";
+        }
+
+        /// <summary>Tempo can't be used here for now: the site just refused to open it for this account, or this Windows can't look at a window. No gold button leads to it then.</summary>
+        private bool TempoShut
+        {
+            get { return _tempo.Refused || _tempo.CantLook; }
+        }
+
+        /// <summary>The first start's steps for the games ticked: the language, games, MapleStory's link, WoW's link, the question.</summary>
+        private List<string> Steps()
+        {
+            var maple = _settings.GamesAsked ? _settings.Maple : _tickMaple || !_tickWow;
+            var wow = _settings.GamesAsked ? _settings.Wow : _tickWow;
+            var steps = new List<string>();
+            if (!_settings.LanguageAsked || _settings.LanguageStep) steps.Add("language");
+            steps.Add("games");
+            if (maple) steps.Add("link-maple");
+            if (wow) steps.Add("link-wow");
+            if (maple) steps.Add("ask");
+            return steps;
+        }
+
+        /// <summary>Once every step is done the first start is over: a step that opens again later shows without the step bars.</summary>
+        private void Settle()
+        {
+            if (_settings.SetupDone || Stage() != "main") return;
+            _settings.SetupDone = true;
+            _settings.Save();
+        }
+
+        private void Go(string page)
+        {
+            _page = page;
+            _unlinkAsk = false;
+            _canvas.Scroll = 0;
+            Repaint();
+        }
+
         // ------------------------------------------------------------------------------------------------ notifications and the tray
 
         /// <summary>
         /// A notification that stays: a Windows toast in the notification center (Toasts.Show; also under Do not disturb,
-        /// which hides the banner but keeps the notification), and the old balloon where the toast can't be made (a
-        /// Windows without the runtime, a shortcut that could not be written). `toast` is its title and line, from
-        /// ToastTexts (short enough to be read whole where the notification center shows it folded); `tag` names the kind
-        /// for the center.
+        /// which hides the banner but keeps the notification), and the old balloon where the toast can't be made. Only
+        /// for what the player has to do something about (ToastTexts.cs).
         /// </summary>
         private void Notify(string[] toast, string tag, ToolTipIcon fallbackIcon, int balloonMs)
         {
+            if (_shots) return;
             try
             {
                 Toasts.Show(toast[0], toast[1], tag);
@@ -269,14 +401,20 @@ namespace GameMargins.Uploader
         }
 
         /// <summary>
-        /// The tray icon and its tooltip: for BadgeMinutes after a stored scan
-        /// the icon with the green check and "Uploaded 3 min ago · 240,910 auctions"; then the plain icon and "Last
-        /// upload: 14:23" (WhenText: "35 min ago" within the hour, "Yesterday 14:23", a date). Called after an upload and
-        /// by the minute clock.
+        /// The tray icon and its tooltip. While Tempo watches the game the icon carries a green dot; for BadgeMinutes
+        /// after a stored scan the green check and "Uploaded 3 min ago · 240,910 auctions"; then the plain icon and
+        /// "Last upload: 14:23". Called after an upload, when Tempo's state changes, and by the minute clock.
         /// </summary>
         private void RefreshTray()
         {
-            var last = LastStored();
+            if (_tray == null) return;
+            if (_settings.Maple && _tempo.Watching)
+            {
+                if (!ReferenceEquals(_tray.Icon, _trayIconDot)) _tray.Icon = _trayIconDot;
+                SetTrayText(Texts.T("Tempo is watching MapleStory"));
+                return;
+            }
+            var last = _settings.Wow ? LastStored() : null;
             var age = last == null ? TimeSpan.MaxValue : DateTime.UtcNow - last.At;
             var recent = last != null && age.TotalMinutes < BadgeMinutes;
             var icon = recent ? _trayIconOk : _trayIcon;
@@ -313,21 +451,126 @@ namespace GameMargins.Uploader
             }
         }
 
+        /// <summary>How Tempo is doing, in one line, with its dot's tone ("ok", "warn", "bad", ""): the same words on Overview, MapleStory's page and the menu.</summary>
+        internal string[] TempoStatus()
+        {
+            if (!_tempo.SiteAllowed) return new[] { Texts.T("Tempo works with gamemargins.com only."), "warn" };
+            if (!_tempo.Linked) return new[] { Texts.T("Tempo is not linked to your account yet"), "warn" };
+            if (_tempo.Refused) return new[] { Texts.T("The site did not open Tempo for this account"), "bad" };
+            if (_tempo.CantLook) return new[] { Texts.T("Tempo can't look at the game on this Windows"), "bad" };
+            if (!_tempo.Consent) return new[] { Texts.T("Tempo is off: it may not look at the game yet"), "" };
+            if (_tempo.RuntimeMissing) return new[] { Texts.T("Tempo needs Microsoft's WebView2"), "warn" };
+            var time = _tempo.SessionTime();
+            if (_tempo.SessionState == "reading") return new[] { Texts.T("Tempo is reading · {0}", time), "ok" };
+            if (_tempo.SessionState == "paused") return new[] { Texts.T("Tempo is paused · {0}", time), "" };
+            if (_tempo.Problem != null) return new[] { _tempo.Problem, _tempo.ProblemTone == "negative" ? "bad" : "warn" };
+            if (_tempo.GameFound == true) return new[] { Texts.T("MapleStory is running · Tempo is not started"), "" };
+            return new[] { Texts.T("Tempo is not started"), "" };
+        }
+
+        /// <summary>How WoW's side is doing, in one line, with its dot's tone.</summary>
+        internal string[] WowStatus()
+        {
+            if (string.IsNullOrEmpty(_settings.Token)) return new[] { Texts.T("Not linked to your account yet"), "warn" };
+            if (WowFolderNow == null) return new[] { Texts.T("WoW folder not found."), "warn" };
+            if (_uploadsRunning > 0) return new[] { Texts.T("Uploading…"), "ok" };
+            if (_lastUploadFailed) return new[] { Texts.T("The last upload failed"), "bad" };
+            var last = LastStored();
+            if (last == null) return new[] { Texts.T("No uploads yet"), "" };
+            return new[] { Texts.T("Uploaded {0}", WhenText(last.At)), "ok" };
+        }
+
+        /// <summary>The menu's lines, made each time it opens (TrayMenu.Make), so the minutes are right.</summary>
+        private List<TrayLine> TrayLines()
+        {
+            var maple = _settings.Maple && _settings.GamesAsked;
+            var wow = _settings.Wow && _settings.GamesAsked;
+            var tempo = TempoStatus();
+            var wowStatus = WowStatus();
+            var shut = maple && TempoShut;
+            var state = new TrayMenuState
+            {
+                TempoShut = shut,
+                Maple = maple,
+                Wow = wow,
+                TempoLine = maple ? tempo[0] : null,
+                TempoTone = tempo[1],
+                WowLine = wow ? "WoW: " + LowerFirst(wowStatus[0]) : null,
+                WowTone = wowStatus[1],
+                TempoReady = maple && !shut && _tempo.Linked && _tempo.Consent,
+                Watching = _tempo.SessionState == "reading" || _tempo.Watching,
+                WowReady = wow && !string.IsNullOrEmpty(_settings.Token),
+                UpdateTo = !_settings.KeepProgramUpdated && _offered != null ? _offered.Version : null,
+            };
+            var actions = new TrayMenuActions
+            {
+                Update = UpdateNow,
+                UploadNow = async delegate { await UploadAll(true); },
+                Quit = Quit,
+                OpenTempo = OpenTempoOrWindow,
+                StopWatching = delegate { _tempo.StopWatching(); },
+                StartWatching = delegate
+                {
+                    var open = _tempo.OpenTempo(true, true);
+                    GC.KeepAlive(open);
+                },
+                OpenWindow = ShowWindow,
+                OpenSettings = delegate
+                {
+                    if (Stage() == "main") Go("settings");
+                    ShowWindow();
+                },
+            };
+            return TrayMenu.Lines(state, actions);
+        }
+
+        private static string LowerFirst(string text)
+        {
+            if (string.IsNullOrEmpty(text) || text.StartsWith("WoW", StringComparison.Ordinal)) return text;
+            return char.ToLower(text[0], Texts.Culture) + text.Substring(1);
+        }
+
         // ------------------------------------------------------------------------------------------------ start-up
 
         private async Task Begin()
         {
             if (_updatedFrom != null) AfterUpdate();
             EnsureAutostart();
-            EnsureWowFolder();
+            // A first start: which games? A copy that was in use before 0.4.0 is not asked: it is used for WoW.
+            if (!_settings.GamesAsked)
+            {
+                // A test start that opens Tempo by itself answers the question itself: MapleStory.
+                if (Program.TestOpen)
+                {
+                    _settings.LanguageAsked = true;
+                    await ApplyGames(false, true);
+                    return;
+                }
+                ShowWindow();
+                return;
+            }
+            if (_settings.Maple)
+            {
+                var tempo = _tempo.Begin();
+                GC.KeepAlive(tempo);
+            }
+            // A step still open (a link, the question): the window says so.
+            if (Stage() != "main") ShowWindow();
+            if (_settings.Wow) await BeginWow();
+            Repaint();
+        }
+
+        /// <summary>WoW's side at the start, or once WoW is turned on: the folder, the link, the first upload, the addon.</summary>
+        private async Task BeginWow()
+        {
+            _wowBegun = true;
+            FindWowFolder();
             if (string.IsNullOrEmpty(_settings.Token))
             {
-                ShowLinkView(null);
                 ShowWindow();
                 await StartLinkFlow();
                 return;
             }
-            ShowMainView();
             var status = await _api.Status(_settings.Token);
             if (status.Status == "unlinked")
             {
@@ -337,51 +580,59 @@ namespace GameMargins.Uploader
             if (status.Status == "ok")
             {
                 ApplyLocale(status.Locale);
-                NoteVersion(status.Latest);
                 _addon.Site = status.Addon;
             }
-            else SetResult(Texts.T("Can't reach {0}; trying again later.", SiteHost()), Negative);
+            else SetResult(Texts.T("Can't reach {0}; trying again later.", SiteHost()), "negative");
             await UploadAll(false);
             await _addon.Maintain(_scanner.WowFolder);
             _maintain.Start();
         }
 
-        /// <summary>The install Settings knows, else the default one, else the player's pick (asked once; "Choose folder…" asks again).</summary>
-        private void EnsureWowFolder()
+        /// <summary>The install Settings knows, else the default one. Not found: WoW's page says so and has "Choose folder…" (no dialog opens by itself).</summary>
+        private void FindWowFolder()
         {
             var folder = Scanner.Accept(_settings.WowFolder) ?? Scanner.FindDefault();
-            if (folder == null)
-            {
-                ShowWindow();
-                folder = AskWowFolder();
-            }
             if (folder == null) return;
             _settings.WowFolder = folder;
             _settings.Save();
             _scanner.Start(folder);
         }
 
-        private string AskWowFolder()
+        /// <summary>"Change" or "Choose folder…" on WoW's page: the player picks the folder.</summary>
+        private async void PickWowFolder()
         {
+            string picked;
             _dialogOpen = true;
             try
             {
                 using (var dialog = new FolderBrowserDialog { Description = Texts.T("Pick your World of Warcraft folder (the one that holds _forever_), or the _forever_ folder itself."), ShowNewFolderButton = false })
                 {
-                    if (dialog.ShowDialog(this) != DialogResult.OK) return null;
-                    var accepted = Scanner.Accept(dialog.SelectedPath);
-                    if (accepted == null) MessageBox.Show(this, Texts.T("WoW folder not found."), Texts.T("Where is World of Warcraft?"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return accepted;
+                    if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                    picked = Scanner.Accept(dialog.SelectedPath);
                 }
             }
             finally
             {
                 _dialogOpen = false;
             }
+            if (picked == null)
+            {
+                SetResult(Texts.T("That folder holds no World of Warcraft: pick the one that holds _forever_."), "warning");
+                return;
+            }
+            _settings.WowFolder = picked;
+            _settings.Save();
+            _scanner.Start(picked);
+            SetResult("", "muted");
+            Repaint();
+            await UploadAll(false);
+            await _addon.Maintain(_scanner.WowFolder);
         }
 
         private void ApplyLocale(string locale)
         {
+            // A language picked in Settings stays; else the account's language on the site.
+            if (_settings.LocalePicked) return;
             var language = Texts.Pick(locale);
             if (locale != null && _settings.Locale != locale)
             {
@@ -390,19 +641,55 @@ namespace GameMargins.Uploader
             }
             if (language == Texts.Language) return;
             Texts.Language = language;
-            BuildTrayMenu();
-            if (_root == null) return;
-            if (_mainView) ShowMainView();
-            else ShowLinkView(null);
+            Repaint();
         }
 
-        private void NoteVersion(string latest)
+        /// <summary>The first start's language step: a click switches the program's language at once (the step draws again in it).</summary>
+        private void TryLanguage(string language)
         {
-            if (_updateLabel == null || string.IsNullOrEmpty(latest) || latest == Program.Version) return;
-            Version mine, theirs;
-            if (!Version.TryParse(Program.Version, out mine) || !Version.TryParse(latest, out theirs) || theirs <= mine) return;
-            _updateLabel.Text = Texts.T("A newer version is available ({0}).", latest);
-            _updateLabel.Visible = true;
+            Texts.Language = Texts.Pick(language);
+            Repaint();
+        }
+
+        /// <summary>"Continue" on the language step: the language that shows is kept, as if picked in Settings, and the games come next.</summary>
+        private void KeepLanguage()
+        {
+            _settings.Locale = Texts.Language;
+            _settings.LocalePicked = true;
+            _settings.LanguageAsked = true;
+            _settings.LanguageStep = true;
+            _settings.Save();
+            Repaint();
+            RefreshTray();
+        }
+
+        /// <summary>"Appearance" in Settings: follow Windows, or always light or dark; the window, the float, the menu and Tempo's window follow at once.</summary>
+        private void PickAppearance(string mode)
+        {
+            _settings.Appearance = mode;
+            _settings.Save();
+            Look.Choose(mode);
+            Repaint();
+        }
+
+        /// <summary>"+ Add a game" in the list, and "Add or remove a game" in Settings: the question of the first start again.</summary>
+        private void EditGames()
+        {
+            _tickMaple = _settings.Maple;
+            _tickWow = _settings.Wow;
+            _gamesEdit = true;
+            Repaint();
+        }
+
+        /// <summary>The language picked in Settings.</summary>
+        private void PickLanguage(string language)
+        {
+            _settings.Locale = language;
+            _settings.LocalePicked = true;
+            _settings.Save();
+            Texts.Language = Texts.Pick(language);
+            Repaint();
+            RefreshTray();
         }
 
         private string SiteHost()
@@ -424,24 +711,38 @@ namespace GameMargins.Uploader
             try { Process.Start(url.AbsoluteUri); } catch (Exception) { }
         }
 
-        /// <summary>The link page with the code on the clipboard, built as Open builds it; "Copied" on the button a moment.</summary>
-        private void CopyLink()
+        /// <summary>The code of the link step that shows: MapleStory's or WoW's.</summary>
+        private LinkStart CodeOf(string stage)
         {
-            if (_link == null || _copyLinkButton == null) return;
+            return stage == "link-maple" ? _tempo.Link : _link;
+        }
+
+        /// <summary>The gold button: the site's link page in the player's browser, the code already filled in. Built here from our own site and the code: nothing the server sent is run.</summary>
+        private void OpenLink(string stage)
+        {
+            var link = CodeOf(stage);
+            if (link != null) OpenSite("/link?code=" + Uri.EscapeDataString(link.UserCode));
+        }
+
+        /// <summary>The same address on the clipboard, for a browser the program does not open by itself; "Copied" on the button a moment.</summary>
+        private void CopyLink(string stage)
+        {
+            var link = CodeOf(stage);
+            if (link == null) return;
             Uri url;
-            if (!Uri.TryCreate(_settings.Site + "/link?code=" + Uri.EscapeDataString(_link.UserCode), UriKind.Absolute, out url)) return;
+            if (!Uri.TryCreate(_settings.Site + "/link?code=" + Uri.EscapeDataString(link.UserCode), UriKind.Absolute, out url)) return;
             try { Clipboard.SetText(url.AbsoluteUri); }
             catch (Exception) { return; }
-            var button = _copyLinkButton;
-            button.Text = Texts.T("Copied");
-            var timer = new System.Windows.Forms.Timer { Interval = 2500 };
+            _copiedAt = DateTime.UtcNow;
+            var timer = new System.Windows.Forms.Timer { Interval = 2600 };
             timer.Tick += delegate
             {
                 timer.Stop();
                 timer.Dispose();
-                if (!button.IsDisposed) button.Text = Texts.T("Copy link");
+                Repaint();
             };
             timer.Start();
+            Repaint();
         }
 
         // ------------------------------------------------------------------------------------------------ linking
@@ -454,10 +755,7 @@ namespace GameMargins.Uploader
             {
                 _linkPaused = true;
                 _link = null;
-                if (_codeLabel != null) _codeLabel.Text = "· · ·";
-                if (_openLinkButton != null) _openLinkButton.Enabled = false;
-                if (_copyLinkButton != null) _copyLinkButton.Enabled = false;
-                SetWaiting(Texts.T("Open this window for a new code."), Muted);
+                SetWaiting(Texts.T("Open this window for a new code."), "muted");
                 return;
             }
             _linkPaused = false;
@@ -465,18 +763,12 @@ namespace GameMargins.Uploader
             if (_link == null || string.IsNullOrEmpty(_link.UserCode) || string.IsNullOrEmpty(_link.DeviceCode))
             {
                 _link = null;
-                if (_codeLabel != null) _codeLabel.Text = "· · ·";
-                if (_openLinkButton != null) _openLinkButton.Enabled = false;
-                if (_copyLinkButton != null) _copyLinkButton.Enabled = false;
-                SetWaiting(Texts.T("Can't reach {0}; trying again later.", SiteHost()), Negative);
+                SetWaiting(Texts.T("Can't reach {0}; trying again later.", SiteHost()), "negative");
                 _pollTimer.Interval = 15000;
                 _pollTimer.Start();
                 return;
             }
-            if (_codeLabel != null) _codeLabel.Text = _link.UserCode;
-            if (_openLinkButton != null) _openLinkButton.Enabled = true;
-            if (_copyLinkButton != null) _copyLinkButton.Enabled = true;
-            SetWaiting(Texts.T("Waiting…"), Muted);
+            SetWaiting("", "");
             _pollTimer.Interval = Math.Max(2, _link.IntervalSeconds) * 1000;
             _pollTimer.Start();
         }
@@ -489,12 +781,10 @@ namespace GameMargins.Uploader
             {
                 if (_link == null || _link.ExpiresAt <= DateTime.UtcNow)
                 {
-                    if (_link != null)
-                    {
-                        _codeRenewals++;
-                        SetWaiting(Texts.T("The code expired; here is a new one."), Warning);
-                    }
+                    var expired = _link != null;
+                    if (expired) _codeRenewals++;
                     await StartLinkFlow();
+                    if (expired && _link != null) SetWaiting(Texts.T("The code expired; here is a new one."), "warning");
                     return;
                 }
                 var result = await _api.Poll(_link.DeviceCode);
@@ -505,8 +795,8 @@ namespace GameMargins.Uploader
                         {
                             // Not a token of ours: whatever answered, it isn't the site we linked to. Start over.
                             _codeRenewals++;
-                            SetWaiting(Texts.T("The code expired; here is a new one."), Warning);
                             await StartLinkFlow();
+                            if (_link != null) SetWaiting(Texts.T("The code expired; here is a new one."), "warning");
                             return;
                         }
                         _pollTimer.Stop();
@@ -514,27 +804,22 @@ namespace GameMargins.Uploader
                         _settings.Token = result.Token;
                         _settings.Save();
                         _link = null;
+                        _linkNotice = null;
                         ApplyLocale(result.Locale);
-                        if (!_settings.AutostartDecided)
-                        {
-                            // On from the first link; the menu turns it off.
-                            _settings.AutostartDecided = true;
-                            SetStartWithWindows(true);
-                            BuildTrayMenu();
-                        }
+                        FirstLink();
                         await Linked();
                         break;
                     case "expired":
                     case "unknown":
                         _codeRenewals++;
-                        SetWaiting(Texts.T("The code expired; here is a new one."), Warning);
                         await StartLinkFlow();
+                        if (_link != null) SetWaiting(Texts.T("The code expired; here is a new one."), "warning");
                         break;
                     case "offline":
-                        SetWaiting(Texts.T("Can't reach {0}; trying again later.", SiteHost()), Negative);
+                        SetWaiting(Texts.T("Can't reach {0}; trying again later.", SiteHost()), "negative");
                         break;
                     default:
-                        SetWaiting(Texts.T("Waiting…"), Muted);
+                        if (_waitTone != "") SetWaiting("", "");
                         break;
                 }
             }
@@ -544,48 +829,68 @@ namespace GameMargins.Uploader
             }
         }
 
-        /// <summary>Just linked: the main view, the site's versions, the first upload, the addon.</summary>
+        /// <summary>The program's first link, for either game: "Start with Windows" goes on; Settings turns it off.</summary>
+        private void FirstLink()
+        {
+            if (_settings.AutostartDecided) return;
+            _settings.AutostartDecided = true;
+            SetStartWithWindows(true);
+        }
+
+        /// <summary>Just linked: the site's versions, the first upload, the addon. Without a WoW folder the window opens on WoW's page, which asks for it.</summary>
         private async Task Linked()
         {
-            ShowMainView();
+            if (_scanner.WowFolder == null) _page = "wow";
+            Repaint();
             var status = await _api.Status(_settings.Token);
-            if (status.Status == "ok")
-            {
-                NoteVersion(status.Latest);
-                _addon.Site = status.Addon;
-            }
+            if (status.Status == "ok") _addon.Site = status.Addon;
             await UploadAll(false);
             await _addon.Maintain(_scanner.WowFolder);
             _maintain.Start();
         }
 
-        /// <summary>The site refused the token (unlinked on Account › Security): back to the link card, and say so even by the clock.</summary>
+        /// <summary>The site refused the token (unlinked on Account › Security): back to the link step, and say so even by the clock.</summary>
         private async Task Unlinked()
         {
             _settings.Token = null;
             _settings.Save();
             _maintain.Stop();
             _retry.Stop();
-            ShowLinkView(Texts.T("This program was unlinked on the site. Link it again with the code below."));
+            _linkNotice = Texts.T("This program was unlinked on the site. Link it again with the code below.");
             Notify(ToastTexts.Unlinked(), "unlinked", ToolTipIcon.Warning, 8000);
             ShowWindow();
             await StartLinkFlow();
         }
 
-        private void SetWaiting(string text, Color colour)
+        /// <summary>"Unlink" in Settings, after its one question: this PC forgets both links; the first step that opens again asks for a new code.</summary>
+        private async void UnlinkHere()
         {
-            if (_waitingLabel == null) return;
-            _waitingLabel.Text = text;
-            _waitingLabel.ForeColor = colour;
+            _unlinkAsk = false;
+            _maintain.Stop();
+            _retry.Stop();
+            _settings.Token = null;
+            _settings.Save();
+            _linkNotice = null;
+            _tempo.Unlink();
+            _page = "overview";
+            Repaint();
+            RefreshTray();
+            if (_settings.Wow) await StartLinkFlow();
+        }
+
+        private void SetWaiting(string text, string tone)
+        {
+            _waitText = text;
+            _waitTone = tone;
+            Repaint();
         }
 
         // ------------------------------------------------------------------------------------------------ uploading
 
         /// <summary>
         /// "Trying again later" made true: an upload that could not reach the site (no network, the site down) tries again
-        /// by itself, after 1, 2, 4, 8 and then every 15 minutes, until one goes through (before 0.2.3 it waited for the
-        /// next file write). A file write or Upload now still goes
-        /// at once; a 429's wait (_retryAfterUtc) stays in charge when there is one.
+        /// by itself, after 1, 2, 4, 8 and then every 15 minutes, until one goes through. A file write or Upload now still
+        /// goes at once; a 429's wait (_retryAfterUtc) stays in charge when there is one.
         /// </summary>
         private void RetryWhenOnline()
         {
@@ -604,7 +909,7 @@ namespace GameMargins.Uploader
 
         private async Task UploadAccount(WowAccount account, bool force)
         {
-            if (string.IsNullOrEmpty(_settings.Token) || !account.Exists) return;
+            if (!_settings.Wow || string.IsNullOrEmpty(_settings.Token) || !account.Exists) return;
             if (_inFlight.Contains(account.Number))
             {
                 // The game wrote the file while its last write is still being sent: once more after this one.
@@ -613,28 +918,27 @@ namespace GameMargins.Uploader
             }
             if (!force && _retryAfterUtc > DateTime.UtcNow)
             {
-                SetResult(Texts.T("Too many uploads; the next try is in {0} min.", Math.Max(1, (int)Math.Ceiling((_retryAfterUtc - DateTime.UtcNow).TotalMinutes))), Info);
+                SetResult(Texts.T("Too many uploads; the next try is in {0} min.", Math.Max(1, (int)Math.Ceiling((_retryAfterUtc - DateTime.UtcNow).TotalMinutes))), "info");
                 ScheduleRetry();
                 return;
             }
             _inFlight.Add(account.Number);
             _uploadsRunning++;
-            if (_uploadButton != null) _uploadButton.Enabled = false;
-            SetStatus(account, Texts.T("uploading…"), Muted);
+            SetStatus(account, Texts.T("uploading…"), "muted");
             try
             {
                 var text = await Scanner.ReadWhenSettled(account.File);
                 if (text == null)
                 {
-                    SetStatus(account, Texts.T("upload failed"), Negative);
-                    SetResult(Texts.T("Upload failed: {0}", Texts.T("Could not read the file; the game may still be writing it.")), Negative);
+                    SetStatus(account, Texts.T("upload failed"), "negative");
+                    SetResult(Texts.T("Upload failed: {0}", Texts.T("Could not read the file; the game may still be writing it.")), "negative");
                     return;
                 }
                 var fingerprint = Scanner.Fingerprint(text);
                 if (!force && _settings.Uploaded.Contains(fingerprint))
                 {
-                    SetStatus(account, Texts.T("uploaded · watching"), Muted);
-                    SetResult(Texts.T("Nothing new in the file: these scans were uploaded before."), Muted);
+                    SetStatus(account, Texts.T("uploaded · watching"), "muted");
+                    SetResult(Texts.T("Nothing new in the file: these scans were uploaded before."), "muted");
                     return;
                 }
                 var result = await _api.Upload(_settings.Token, text);
@@ -642,6 +946,7 @@ namespace GameMargins.Uploader
                 {
                     case "ok":
                         _offlineTries = 0;
+                        _lastUploadFailed = false;
                         _settings.MarkUploaded(fingerprint);
                         ScanResult first = null;
                         ScanResult skipped = null;
@@ -655,19 +960,14 @@ namespace GameMargins.Uploader
                             else if (r.Status != "duplicate" && skipped == null) skipped = r;
                         }
                         _settings.Save();
-                        SetStatus(account, Texts.T("uploaded · watching"), Muted);
-                        RenderUploads();
-                        // The green check and the tooltip for the next ten minutes.
+                        SetStatus(account, Texts.T("uploaded · watching"), "muted");
+                        // The green check and the tooltip for the next ten minutes: an upload that went well shows there, not as a notification.
                         RefreshTray();
-                        if (first != null)
-                        {
-                            SetResult(Texts.T("Uploaded: {0} auctions · {1}", first.Auctions.ToString("N0", Texts.Culture), MarketLabel(first.Market)), Foreground);
-                            Notify(ToastTexts.Uploaded(first.Auctions, first.Market), "upload", ToolTipIcon.None, 4000);
-                        }
-                        else if (skipped != null) SetResult(Texts.T("Skipped: {0}", RefusalText(skipped.Code, skipped.Why)), Warning);
+                        if (first != null) SetResult(Texts.T("Uploaded: {0} auctions · {1}", first.Auctions.ToString("N0", Texts.Culture), MarketLabel(first.Market)), "muted");
+                        else if (skipped != null) SetResult(Texts.T("Skipped: {0}", RefusalText(skipped.Code, skipped.Why)), "warning");
                         // No scan stored, nothing skipped: the file went for its characters (a level-up, a skill-up), or for nothing.
-                        else if (result.Characters > 0) SetResult(Texts.T("Characters up to date on the site: {0}.", result.Characters), Muted);
-                        else SetResult(Texts.T("Nothing new in the file: these scans were uploaded before."), Muted);
+                        else if (result.Characters > 0) SetResult(Texts.T("Characters up to date on the site: {0}.", result.Characters), "muted");
+                        else SetResult(Texts.T("Nothing new in the file: these scans were uploaded before."), "muted");
                         break;
                     case "unlinked":
                         await Unlinked();
@@ -676,21 +976,21 @@ namespace GameMargins.Uploader
                         if (result.RetryAfter > 0)
                         {
                             _retryAfterUtc = DateTime.UtcNow.AddSeconds(result.RetryAfter);
-                            SetStatus(account, Texts.T("file found · watching"), Muted);
-                            SetResult(Texts.T("Too many uploads; the next try is in {0} min.", Math.Max(1, (int)Math.Ceiling(result.RetryAfter / 60.0))), Info);
+                            SetStatus(account, Texts.T("file found · watching"), "muted");
+                            SetResult(Texts.T("Too many uploads; the next try is in {0} min.", Math.Max(1, (int)Math.Ceiling(result.RetryAfter / 60.0))), "info");
                             ScheduleRetry();
                         }
                         else
                         {
-                            var why = Texts.T("Upload failed: {0}", RefusalText(result.Code, result.Error));
-                            SetStatus(account, Texts.T("upload failed"), Negative);
-                            SetResult(why, Negative);
+                            _lastUploadFailed = true;
+                            SetStatus(account, Texts.T("upload failed"), "negative");
+                            SetResult(Texts.T("Upload failed: {0}", RefusalText(result.Code, result.Error)), "negative");
                             Notify(ToastTexts.UploadFailed(result.Code), "failed", ToolTipIcon.Error, 5000);
                         }
                         break;
                     default:
-                        SetStatus(account, Texts.T("upload failed"), Negative);
-                        SetResult(Texts.T("Can't reach {0}; trying again later.", SiteHost()), Negative);
+                        SetStatus(account, Texts.T("upload failed"), "negative");
+                        SetResult(Texts.T("Can't reach {0}; trying again later.", SiteHost()), "negative");
                         RetryWhenOnline();
                         break;
                 }
@@ -699,7 +999,7 @@ namespace GameMargins.Uploader
             {
                 _inFlight.Remove(account.Number);
                 _uploadsRunning--;
-                if (_uploadButton != null) _uploadButton.Enabled = _uploadsRunning == 0;
+                Repaint();
                 if (!string.IsNullOrEmpty(_settings.Token))
                 {
                     _afterUpload.Stop();
@@ -763,10 +1063,14 @@ namespace GameMargins.Uploader
             return parts[0].ToUpperInvariant() + " · " + ruleset + " · " + faction;
         }
 
-        private string WhenText(DateTime atUtc)
+        internal static string WhenText(DateTime atUtc)
+        {
+            return WhenText(atUtc, ShotNow ?? DateTime.Now);
+        }
+
+        internal static string WhenText(DateTime atUtc, DateTime now)
         {
             var at = atUtc.ToLocalTime();
-            var now = DateTime.Now;
             var age = now - at;
             var culture = Texts.Culture;
             if (age.TotalMinutes < 1) return Texts.T("just now");
@@ -778,19 +1082,27 @@ namespace GameMargins.Uploader
             return at.ToString("d", culture);
         }
 
+        private void SetStatus(WowAccount account, string text, string tone)
+        {
+            _accountStatus[account.Number] = new[] { text, tone };
+            Repaint();
+        }
+
+        private void SetResult(string text, string tone)
+        {
+            _result = text ?? "";
+            _resultTone = tone;
+            Repaint();
+        }
+
         // ------------------------------------------------------------------------------------------------ the addon
 
         private void OnAddonChanged(AddonStatus status)
         {
-            if (_addonLabel != null)
-            {
-                _addonLabel.Text = status.Text;
-                _addonLabel.ForeColor = status.Mark == AddonMark.Failed ? Negative : status.Mark == AddonMark.Info ? Info : status.Mark == AddonMark.Muted ? Muted : Foreground;
-            }
-            if (status.JustInstalled != null)
-            {
-                Notify(ToastTexts.Addon(status.JustInstalled, status.WasUpdate), "addon", ToolTipIcon.None, 5000);
-            }
+            _addonText = status.Text;
+            _addonTone = status.Mark == AddonMark.Failed ? "negative" : status.Mark == AddonMark.Info ? "info" : status.Mark == AddonMark.Muted ? "muted" : "";
+            // An addon that was installed or updated says so on WoW's page, not in a notification.
+            Repaint();
         }
 
         // ------------------------------------------------------------------------------------------------ the program's own update
@@ -803,7 +1115,8 @@ namespace GameMargins.Uploader
 
         /// <summary>
         /// Asks the site for its newest version (Updater.Check). A newer one is installed by itself with "Keep the program up
-        /// to date" ticked, else offered in the menu as "Update to x.y.z". A site that can't be reached: the next check.
+        /// to date" on, else offered in Settings and the menu as "Update to x.y.z". A site that can't be reached: the next
+        /// check. A version that did not stay up after an earlier update is never taken again.
         /// </summary>
         private async Task CheckForUpdate()
         {
@@ -818,17 +1131,18 @@ namespace GameMargins.Uploader
             {
                 _updating = false;
             }
-            if (found == null || found.Version == _skipVersion) return;
+            if (_updater.Reached) _checked = true;
+            Repaint();
+            if (found == null || found.Version == _skipVersion || found.Version == _settings.UpdateBad) return;
             if (_settings.KeepProgramUpdated) await InstallUpdate(found, false);
             else Offer(found);
         }
 
-        /// <summary>"Update to x.y.z" in bold on top of the menu, and once per version the notification that says where it is.</summary>
+        /// <summary>"Keep the program up to date" is off: the version waits in Settings ("Update now") and in the menu, and one notification says so, once per version.</summary>
         private void Offer(ProgramRelease release)
         {
-            var changed = _offered == null || _offered.Version != release.Version;
             _offered = release;
-            if (changed) BuildTrayMenu();
+            Repaint();
             if (_settings.UpdateNoted == release.Version) return;
             _settings.UpdateNoted = release.Version;
             _settings.Save();
@@ -837,9 +1151,14 @@ namespace GameMargins.Uploader
 
         private void DropOffer()
         {
-            if (_offered == null) return;
             _offered = null;
-            BuildTrayMenu();
+            Repaint();
+        }
+
+        private async void UpdateNow()
+        {
+            var release = _offered;
+            if (release != null) await InstallUpdate(release, true);
         }
 
         /// <summary>
@@ -874,380 +1193,248 @@ namespace GameMargins.Uploader
             _handOverTo = result.Exe;
             _handOverRelease = release;
             _handOverClicked = clicked;
+            Repaint();
             HandOverWhenIdle();
         }
 
         /// <summary>
-        /// Hands over to the checked new exe once nothing is under way: no upload, no addon install, no folder dialog, and
-        /// for an update by itself no open window either (a click on "Update to" doesn't wait for that). Autostart (while
-        /// ticked) and the Start-menu shortcut point at the new exe, it starts with --updated-from naming this one, and
-        /// this copy quits. When Windows won't start it, both point back here and this copy keeps running.
+        /// Hands over to the checked new exe once nothing is under way: no upload, no addon install, no folder dialog, no
+        /// Tempo session (Tempo reading, or paused with numbers: the update waits until the session is stopped and kept,
+        /// or reset), and for an update by itself no open window either (a click on "Update now" doesn't wait for that).
+        /// Autostart (while on) and the Start-menu shortcut point at the new exe, it starts with --updated-from naming this
+        /// one, and this copy closes its window and icon. This exe stays where it is as the way back: Program.Main
+        /// stands by for half a minute, and when the new copy does not stay up it points everything back here, marks the
+        /// version as bad and starts this one again (Updater.StandBy).
         /// </summary>
         private void HandOverWhenIdle()
         {
             _handOver.Stop();
             if (_handOverTo == null || _quitting) return;
-            if (!Updater.MayHandOver(_uploadsRunning, _addon.Busy, _dialogOpen, Visible, _handOverClicked))
+            if (!Updater.MayHandOver(_uploadsRunning, _addon.Busy, _dialogOpen, Visible, _handOverClicked, _tempo.SessionLive))
             {
                 _handOver.Start();
                 return;
             }
             var exe = _handOverTo;
-            PointAt(exe);
-            if (Updater.Start(exe, "--updated-from " + Updater.Quote(Application.ExecutablePath)))
+            PointAt(exe, _settings.StartWithWindows);
+            var started = Updater.StartProcess(exe, "--updated-from " + Updater.Quote(Application.ExecutablePath));
+            if (started != null)
             {
+                Program.HandedOver = started;
+                Program.HandedOverVersion = _handOverRelease.Version;
                 Quit();
                 return;
             }
-            PointAt(Application.ExecutablePath);
+            PointAt(Application.ExecutablePath, _settings.StartWithWindows);
             _skipVersion = _handOverRelease.Version;
             _handOverTo = null;
             DropOffer();
             Notify(ToastTexts.UpdateFailed(_handOverRelease.Version), "update", ToolTipIcon.Warning, 6000);
         }
 
-        /// <summary>Autostart (only while "Start with Windows" is ticked, as at every start) and the Start-menu shortcut follow `exe`.</summary>
-        private void PointAt(string exe)
+        /// <summary>Autostart (only while "Start with Windows" is on, as at every start) and the Start-menu shortcut follow `exe`.</summary>
+        internal static void PointAt(string exe, bool startWithWindows)
         {
-            if (_settings.StartWithWindows) WriteRunValue(exe);
-            Toasts.EnsureShortcut(exe);
+            if (startWithWindows) WriteRunValue(exe);
+            if (!Program.Isolated) Toasts.EnsureShortcut(exe);
         }
 
         /// <summary>
-        /// This copy was started by the update of an older one (--updated-from): it says so once, and removes the old exe
-        /// when that one was installed next to the settings too (a copy elsewhere is the player's and stays).
+        /// This copy was started by the update of an older one (--updated-from). No notification: Overview says "Updated
+        /// to x" for a few days, with a link to what is new. The exe it replaced stays as the way back; copies older than
+        /// that one, installed next to the settings, go.
         /// </summary>
         private void AfterUpdate()
         {
-            Notify(ToastTexts.Updated(Program.Version, _settings.KeepProgramUpdated), "updated", ToolTipIcon.None, 6000);
-            var removal = Updater.RemoveReplaced(Settings.Folder, _updatedFrom, Application.ExecutablePath);
+            _settings.UpdatedTo = Program.Version;
+            _settings.UpdatedAt = DateTime.UtcNow;
+            _settings.Save();
+            var removal = Updater.RemoveOlder(Settings.Folder, _updatedFrom, Application.ExecutablePath);
             GC.KeepAlive(removal);
         }
 
-        // ------------------------------------------------------------------------------------------------ the views
-
-        private void ResetRoot()
+        /// <summary>Overview's quiet line after the program updated itself: "Updated to 0.4.1 last night"; null once it is old news.</summary>
+        internal string UpdatedNote()
         {
-            SuspendLayout();
-            Controls.Clear();
-            _accountsPanel = null;
-            _addonLabel = null;
-            _uploadsTable = null;
-            _resultLabel = null;
-            _updateLabel = null;
-            _folderLabel = null;
-            _uploadButton = null;
-            _codeLabel = null;
-            _waitingLabel = null;
-            _openLinkButton = null;
-            _copyLinkButton = null;
-            _statusLabels.Clear();
-            _root = new Panel { Dock = DockStyle.Fill, Padding = new Padding(24, 20, 24, 20), BackColor = Background, AutoScroll = true };
-            Controls.Add(_root);
-            ResumeLayout();
+            return UpdatedNote(ShotNow ?? DateTime.Now);
         }
 
-        private static Label HeadingLabel(string text)
+        internal string UpdatedNote(DateTime now)
         {
-            return new Label { Text = text.ToUpperInvariant(), Font = Heading, ForeColor = Muted, AutoSize = true, Margin = new Padding(0, 0, 0, 8) };
+            if (string.IsNullOrEmpty(_settings.UpdatedTo) || _settings.UpdatedTo != Program.Version || _settings.UpdatedAt == default(DateTime)) return null;
+            var at = _settings.UpdatedAt.ToLocalTime();
+            if ((now - at).TotalDays > UpdatedNoteDays) return null;
+            string when;
+            if (at.Date == now.Date) when = at.Hour < 6 ? Texts.T("last night") : Texts.T("today");
+            else if (at.Date == now.Date.AddDays(-1)) when = at.Hour >= 18 ? Texts.T("last night") : Texts.T("yesterday");
+            else when = Texts.T("on {0}", at.ToString("dddd", Texts.Culture));
+            return Texts.T("Updated to {0} {1}", Program.Version, when);
         }
 
-        private void ShowLinkView(string notice)
+        /// <summary>Under the list: "Version 0.4.0 · up to date", or what is on its way.</summary>
+        internal string VersionLine()
         {
-            _mainView = false;
-            ResetRoot();
-            var column = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, BackColor = Background };
-            column.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-
-            column.Controls.Add(HeadingLabel(Texts.T("Link this program to your account")));
-
-            if (notice != null) column.Controls.Add(new Label { Text = notice, ForeColor = Warning, AutoSize = true, MaximumSize = new Size(560, 0), Margin = new Padding(0, 0, 0, 12) });
-
-            var box = new Panel { Height = 96, Dock = DockStyle.Top, BackColor = Background, Margin = new Padding(0, 4, 0, 16) };
-            box.Paint += delegate(object s, PaintEventArgs e)
-            {
-                using (var pen = new Pen(Muted, 1F) { DashStyle = DashStyle.Dash })
-                {
-                    e.Graphics.DrawRectangle(pen, 0, 0, box.Width - 1, box.Height - 1);
-                }
-            };
-            _codeLabel = new Label { Text = _link != null ? _link.UserCode : "· · ·", Font = Code, ForeColor = Foreground, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter };
-            box.Controls.Add(_codeLabel);
-            column.Controls.Add(box);
-
-            column.Controls.Add(new Label
-            {
-                Text = Texts.T("Go to {0}, log in as you always do and enter this code. The code works for 10 minutes; no password or mail code goes into this program.", LinkAddress()),
-                ForeColor = Muted,
-                AutoSize = true,
-                MaximumSize = new Size(560, 0),
-                Margin = new Padding(0, 0, 0, 16),
-            });
-
-            var row = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Background, Margin = new Padding(0) };
-            _openLinkButton = GreyButton(Texts.T("Open {0}", LinkAddress()));
-            _openLinkButton.Enabled = _link != null;
-            _openLinkButton.Click += delegate
-            {
-                // Built here from our own site and the code: nothing the server sent is run.
-                if (_link != null) OpenSite("/link?code=" + Uri.EscapeDataString(_link.UserCode));
-            };
-            row.Controls.Add(_openLinkButton);
-            // The same link for the clipboard, for a browser the program does not open by itself.
-            _copyLinkButton = GreyButton(Texts.T("Copy link"));
-            _copyLinkButton.Enabled = _link != null;
-            _copyLinkButton.Margin = new Padding(8, 0, 0, 0);
-            _copyLinkButton.Click += delegate { CopyLink(); };
-            row.Controls.Add(_copyLinkButton);
-            _waitingLabel = new Label { Text = _linkPaused ? Texts.T("Open this window for a new code.") : Texts.T("Waiting…"), ForeColor = Muted, AutoSize = true, Margin = new Padding(12, 10, 0, 0) };
-            row.Controls.Add(_waitingLabel);
-            column.Controls.Add(row);
-
-            _root.Controls.Add(column);
+            var version = Texts.T("Version {0}", Program.Version);
+            if (_handOverTo != null && _handOverRelease != null) return version + " · " + Texts.T("{0} installs soon", _handOverRelease.Version);
+            if (_offered != null) return version + " · " + Texts.T("{0} is ready", _offered.Version);
+            if (_checked) return version + " · " + Texts.T("up to date");
+            return version;
         }
 
-        private void ShowMainView()
+        /// <summary>This copy took over again after version `version` did not stay up (Program.StandBy): said once, by the clock.</summary>
+        public void SayUpdateFailed(string version)
         {
-            _mainView = true;
-            ResetRoot();
-            var column = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, BackColor = Background };
-            column.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-
-            column.Controls.Add(HeadingLabel(Texts.T("WoW accounts")));
-            _accountsPanel = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Dock = DockStyle.Top, BackColor = Background, Margin = new Padding(0, 0, 0, 4) };
-            column.Controls.Add(_accountsPanel);
-            _folderLabel = new Label { ForeColor = Warning, AutoSize = true, Visible = false, Margin = new Padding(0, 0, 0, 12) };
-            column.Controls.Add(_folderLabel);
-
-            // The addon's row, in the accounts' shape: what is installed and what the program will do about it.
-            var installed = _scanner.WowFolder != null ? Addon.InstalledVersion(_scanner.WowFolder) : null;
-            var addonRow = Row(Texts.T("GameMargins addon"), installed ?? Texts.T("no scans yet"), Muted, out _addonLabel);
-            if (installed == null) _addonLabel.Text = _settings.KeepAddonUpdated ? Texts.T("not installed · installs when WoW is closed") : Texts.T("not installed · you install it yourself");
-            else if (!_settings.KeepAddonUpdated) _addonLabel.Text = Texts.T("{0} · you keep it up to date yourself", installed);
-            else _addonLabel.Text = installed;
-            addonRow.Margin = new Padding(0, 0, 0, 16);
-            column.Controls.Add(addonRow);
-
-            column.Controls.Add(HeadingLabel(Texts.T("Last uploads")));
-            _uploadsTable = new TableLayoutPanel { AutoSize = true, Dock = DockStyle.Top, ColumnCount = 3, BackColor = Background, Margin = new Padding(0, 0, 0, 12) };
-            _uploadsTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32F));
-            _uploadsTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 46F));
-            _uploadsTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 22F));
-            column.Controls.Add(_uploadsTable);
-
-            _resultLabel = new Label { ForeColor = Muted, AutoSize = true, MaximumSize = new Size(560, 0), Margin = new Padding(0, 0, 0, 12), Text = "" };
-            column.Controls.Add(_resultLabel);
-
-            var bottom = new TableLayoutPanel { AutoSize = true, Dock = DockStyle.Top, ColumnCount = 2, BackColor = Background, Margin = new Padding(0, 4, 0, 0) };
-            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            _uploadButton = new Button
-            {
-                Text = Texts.T("Upload now"),
-                Font = Strong,
-                BackColor = Accent,
-                ForeColor = OnAccent,
-                FlatStyle = FlatStyle.Flat,
-                Size = new Size(170, 56),
-                Margin = new Padding(0, 0, 16, 0),
-                Cursor = Cursors.Hand,
-            };
-            _uploadButton.FlatAppearance.BorderSize = 0;
-            _uploadButton.Enabled = _uploadsRunning == 0;
-            _uploadButton.Click += async delegate { await UploadAll(true); };
-            bottom.Controls.Add(_uploadButton, 0, 0);
-            bottom.Controls.Add(new Label { Text = Texts.T("Next: as soon as the game writes the file (log out or /reload)."), ForeColor = Muted, AutoSize = true, MaximumSize = new Size(360, 0), Anchor = AnchorStyles.Left, Margin = new Padding(0, 8, 0, 0) }, 1, 0);
-            column.Controls.Add(bottom);
-
-            _updateLabel = new Label { ForeColor = Info, AutoSize = true, Visible = false, Margin = new Padding(0, 16, 0, 0) };
-            column.Controls.Add(_updateLabel);
-
-            _root.Controls.Add(column);
-            RenderAccounts();
-            RenderUploads();
+            _skipVersion = version;
+            BeginInvoke(new Action(delegate { Notify(ToastTexts.UpdateFailed(version), "update", ToolTipIcon.Warning, 6000); }));
         }
 
-        /// <summary>A bordered row with a name on the left and a status on the right, as the accounts and the addon are shown.</summary>
-        private static Panel Row(string name, string status, Color statusColour, out Label statusLabel)
-        {
-            var row = new Panel { Width = 560, Height = 46, BackColor = Surface, Margin = new Padding(0, 0, 0, 8) };
-            row.Paint += delegate(object s, PaintEventArgs e)
-            {
-                using (var pen = new Pen(Border)) e.Graphics.DrawRectangle(pen, 0, 0, row.Width - 1, row.Height - 1);
-            };
-            row.Controls.Add(new Label { Text = name, ForeColor = Foreground, AutoSize = true, Location = new Point(14, 12) });
-            statusLabel = new Label
-            {
-                Text = status,
-                ForeColor = statusColour,
-                AutoSize = false,
-                TextAlign = ContentAlignment.MiddleRight,
-                Size = new Size(360, 46),
-                Location = new Point(560 - 360 - 14, 0),
-            };
-            row.Controls.Add(statusLabel);
-            return row;
-        }
+        // ------------------------------------------------------------------------------------------------ the games
 
-        private void RenderAccounts()
+        /// <summary>The answer to "Which games do you play?": each game is turned on or off, and the next step that is open shows.</summary>
+        private async Task ApplyGames(bool wow, bool maple)
         {
-            if (_accountsPanel == null) return;
-            _accountsPanel.SuspendLayout();
-            _accountsPanel.Controls.Clear();
-            _statusLabels.Clear();
-            if (_scanner.WowFolder == null)
+            var hadWow = _settings.Wow && _settings.GamesAsked;
+            var hadMaple = _settings.Maple && _settings.GamesAsked;
+            _settings.GamesAsked = true;
+            _settings.Wow = wow;
+            _settings.Maple = maple;
+            _settings.Save();
+            _gamesEdit = false;
+            if (_page == "maple" && !maple) _page = "overview";
+            if (_page == "wow" && !wow) _page = "overview";
+            if (!maple && hadMaple) _tempo.End();
+            if (!wow && hadWow)
             {
-                _folderLabel.Text = Texts.T("WoW folder not found.");
-                _folderLabel.Visible = true;
-                var choose = GreyButton(Texts.T("Choose folder…"));
-                choose.Click += async delegate
-                {
-                    var picked = AskWowFolder();
-                    if (picked == null) return;
-                    _settings.WowFolder = picked;
-                    _settings.Save();
-                    _scanner.Start(picked);
-                    RenderAccounts();
-                    await UploadAll(false);
-                    await _addon.Maintain(_scanner.WowFolder);
-                };
-                _accountsPanel.Controls.Add(choose);
+                _pollTimer.Stop();
+                _maintain.Stop();
+                _retry.Stop();
+                _link = null;
             }
-            else
+            if (maple && !hadMaple)
             {
-                _folderLabel.Visible = false;
-                foreach (var account in _scanner.Accounts)
-                {
-                    Label status;
-                    var row = Row(Texts.T("WoW account {0}", account.Number) + " · Forever", account.Exists ? Texts.T("file found · watching") : Texts.T("no scans yet"), Muted, out status);
-                    _statusLabels[account.Number] = status;
-                    _accountsPanel.Controls.Add(row);
-                }
-                if (_scanner.Accounts.Count == 0) _accountsPanel.Controls.Add(new Label { Text = Texts.T("no scans yet"), ForeColor = Muted, AutoSize = true, Margin = new Padding(0, 0, 0, 8) });
+                var tempo = _tempo.Begin();
+                GC.KeepAlive(tempo);
             }
-            _accountsPanel.ResumeLayout();
+            Repaint();
+            RefreshTray();
+            if (wow && (!hadWow || !_wowBegun)) await BeginWow();
+            Repaint();
         }
 
-        private void SetStatus(WowAccount account, string text, Color colour)
-        {
-            Label label;
-            if (!_statusLabels.TryGetValue(account.Number, out label)) return;
-            label.Text = text;
-            label.ForeColor = colour;
-        }
+        // ------------------------------------------------------------------------------------------------ Tempo
 
-        private void SetResult(string text, Color colour)
+        /// <summary>Tempo's state changed: the window and the icon follow.</summary>
+        private void OnTempoChanged()
         {
-            if (_resultLabel == null) return;
-            _resultLabel.Text = text;
-            _resultLabel.ForeColor = colour;
-        }
-
-        private void RenderUploads()
-        {
-            if (_uploadsTable == null) return;
-            _uploadsTable.SuspendLayout();
-            _uploadsTable.Controls.Clear();
-            _uploadsTable.RowStyles.Clear();
-            _uploadsTable.RowCount = 0;
-            var header = new[] { Texts.T("When"), Texts.T("Auction house"), Texts.T("Auctions") };
-            for (var c = 0; c < 3; c++)
+            if (_quitting || IsDisposed || _tempoDirty || _shots) return;
+            // On the next turn, and once for changes that come together.
+            _tempoDirty = true;
+            BeginInvoke(new Action(delegate
             {
-                _uploadsTable.Controls.Add(new Label { Text = header[c], ForeColor = Muted, Font = Small, AutoSize = true, Dock = DockStyle.Fill, TextAlign = c == 2 ? ContentAlignment.MiddleRight : ContentAlignment.MiddleLeft, Margin = new Padding(4, 0, 4, 6) }, c, 0);
+                _tempoDirty = false;
+                if (_quitting || IsDisposed) return;
+                Repaint();
+                RefreshTray();
+            }));
+        }
+
+        private void OpenTempoOrWindow()
+        {
+            // Nothing to open for an account the site just refused (or on a Windows that can't look): MapleStory's page says why.
+            if (TempoShut)
+            {
+                if (Stage() == "main") Go("maple");
+                ShowWindow();
+                return;
             }
-            if (_settings.Uploads.Count == 0)
+            if (!_tempo.Linked || !_tempo.Consent)
             {
-                var none = new Label { Text = Texts.T("No uploads yet. Scan the auction house in the game, then log out or type /reload: the upload starts by itself."), ForeColor = Muted, AutoSize = true, MaximumSize = new Size(540, 0), Margin = new Padding(4, 4, 4, 4) };
-                _uploadsTable.Controls.Add(none, 0, 1);
-                _uploadsTable.SetColumnSpan(none, 3);
+                if (_tempo.Linked) _askAgain = true;
+                Repaint();
+                ShowWindow();
+                return;
             }
-            else
-            {
-                var r = 1;
-                foreach (var row in _settings.Uploads)
-                {
-                    var cells = new[] { WhenText(row.At), MarketLabel(row.Market), row.Auctions.ToString("N0", Texts.Culture) };
-                    for (var c = 0; c < 3; c++)
-                    {
-                        var cell = new Label { Text = cells[c], ForeColor = Foreground, AutoSize = true, Dock = DockStyle.Fill, TextAlign = c == 2 ? ContentAlignment.MiddleRight : ContentAlignment.MiddleLeft, Margin = new Padding(4, 6, 4, 6) };
-                        if (r > 1) cell.Paint += delegate(object s, PaintEventArgs e) { using (var pen = new Pen(Border)) e.Graphics.DrawLine(pen, 0, 0, cell.Width, 0); };
-                        _uploadsTable.Controls.Add(cell, c, r);
-                    }
-                    r++;
-                }
-            }
-            _uploadsTable.ResumeLayout();
+            var open = _tempo.OpenTempo(false, false);
+            GC.KeepAlive(open);
         }
 
-        private static Button GreyButton(string text)
+        /// <summary>"Try again" on the page of an account the site refused Tempo: the site is asked now.</summary>
+        private void CheckTempoAgain()
         {
-            var b = new Button { Text = text, ForeColor = Foreground, BackColor = Surface, FlatStyle = FlatStyle.Flat, AutoSize = true, Padding = new Padding(10, 6, 10, 6), Cursor = Cursors.Hand, Margin = new Padding(0) };
-            b.FlatAppearance.BorderColor = Border;
-            b.FlatAppearance.BorderSize = 1;
-            b.FlatAppearance.MouseOverBackColor = Border;
-            return b;
+            var check = _tempo.CheckAccess();
+            GC.KeepAlive(check);
         }
 
-        // ------------------------------------------------------------------------------------------------ the tray
-
-        /// <summary>The menu (TrayMenu.cs) from the settings and the version on offer; again whenever one of them changes.</summary>
-        private void BuildTrayMenu()
+        /// <summary>"Yes, Tempo may look": the player's yes is kept, and Tempo opens and starts.</summary>
+        private void SayYes()
         {
-            var state = new TrayMenuState
+            _askAgain = false;
+            _tempo.GiveConsent();
+            _page = "maple";
+            Repaint();
+            var open = _tempo.OpenTempo(true, false);
+            GC.KeepAlive(open);
+        }
+
+        /// <summary>"No, not now": nothing is looked at; MapleStory's page and Settings lead back to the question.</summary>
+        private void SayNo()
+        {
+            _askAgain = false;
+            _settings.TempoAsked = true;
+            _settings.Save();
+            if (_settings.Maple) _page = "maple";
+            Repaint();
+        }
+
+        /// <summary>The switch "Tempo may look at the MapleStory window" in Settings: off stops Tempo; on is the question again.</summary>
+        private void ToggleConsent()
+        {
+            if (_tempo.Consent) _tempo.TakeConsent();
+            else _askAgain = true;
+            Repaint();
+        }
+
+        // ------------------------------------------------------------------------------------------------ settings
+
+        private void ToggleStartWithWindows()
+        {
+            _settings.AutostartDecided = true;
+            SetStartWithWindows(!_settings.StartWithWindows);
+            Repaint();
+        }
+
+        private async void ToggleKeepAddon()
+        {
+            var on = !_settings.KeepAddonUpdated;
+            _settings.KeepAddonUpdated = on;
+            _settings.Save();
+            _addon.KeepUpdated = on;
+            Repaint();
+            if (!string.IsNullOrEmpty(_settings.Token)) await _addon.Maintain(_scanner.WowFolder);
+        }
+
+        /// <summary>
+        /// "Keep the program up to date". On: a version on offer goes in now, else the site is asked. Off while an update
+        /// by itself waits to hand over: it waits for a click instead (the checked exe stays, so the click needs no second
+        /// download).
+        /// </summary>
+        private async void ToggleKeepProgram()
+        {
+            var on = !_settings.KeepProgramUpdated;
+            _settings.KeepProgramUpdated = on;
+            _settings.Save();
+            var offered = _offered;
+            if (on) _offered = null;
+            else if (_handOverTo != null && !_handOverClicked)
             {
-                Host = SiteHost(),
-                StartWithWindows = _settings.StartWithWindows,
-                KeepAddonUpdated = _settings.KeepAddonUpdated,
-                KeepProgramUpdated = _settings.KeepProgramUpdated,
-                UpdateTo = _offered != null ? _offered.Version : null,
-            };
-            var actions = new TrayMenuActions
-            {
-                Update = async delegate
-                {
-                    var release = _offered;
-                    if (release != null) await InstallUpdate(release, true);
-                },
-                UploadNow = async delegate { await UploadAll(true); },
-                OpenSite = delegate { OpenSite("/wow-forever"); },
-                Quit = Quit,
-                StartWithWindows = delegate(bool on)
-                {
-                    _settings.AutostartDecided = true;
-                    SetStartWithWindows(on);
-                },
-                KeepAddonUpdated = async delegate(bool on)
-                {
-                    _settings.KeepAddonUpdated = on;
-                    _settings.Save();
-                    _addon.KeepUpdated = on;
-                    if (!string.IsNullOrEmpty(_settings.Token)) await _addon.Maintain(_scanner.WowFolder);
-                },
-                KeepProgramUpdated = async delegate(bool on)
-                {
-                    _settings.KeepProgramUpdated = on;
-                    _settings.Save();
-                    // Ticked: a version on offer goes in now, else the site is asked; the "Update to" line leaves the menu.
-                    // Unticked while an update by itself waits to hand over: it waits for a click instead (the checked
-                    // exe stays, so the click needs no second download). The menu is built again once this click is done.
-                    var offered = _offered;
-                    if (on) _offered = null;
-                    else if (_handOverTo != null && !_handOverClicked)
-                    {
-                        _handOver.Stop();
-                        _offered = _handOverRelease;
-                        _handOverTo = null;
-                    }
-                    BeginInvoke(new Action(BuildTrayMenu));
-                    if (!on) return;
-                    if (offered != null) await InstallUpdate(offered, false);
-                    else await CheckForUpdate();
-                },
-            };
-            var menu = TrayMenu.Build(state, actions);
-            var old = _tray.ContextMenuStrip;
-            _tray.ContextMenuStrip = menu;
-            if (old != null) old.Dispose();
+                _handOver.Stop();
+                _offered = _handOverRelease;
+                _handOverTo = null;
+            }
+            Repaint();
+            if (!on) return;
+            if (offered != null) await InstallUpdate(offered, false);
+            else await CheckForUpdate();
         }
 
         private void SetStartWithWindows(bool on)
@@ -1259,6 +1446,7 @@ namespace GameMargins.Uploader
                 WriteRunValue(Application.ExecutablePath);
                 return;
             }
+            if (Program.Isolated) return;
             try
             {
                 using (var key = Registry.CurrentUser.OpenSubKey(RunKey, true))
@@ -1268,16 +1456,15 @@ namespace GameMargins.Uploader
             }
             catch (Exception)
             {
-                // No registry access: the tick stays, Windows just won't start it.
+                // No registry access: the switch stays, Windows just won't start it.
             }
         }
 
         /// <summary>
         /// At every start, the way Toasts.EnsureShortcut keeps the Start-menu shortcut: with "Start with Windows" on, the
-        /// Run value is written again when it doesn't start this exe (every version has its own file name,
-        /// GameMarginsDesktop-0.2.5.exe, so a new file would leave autostart on the old one; the program's own update
-        /// points it at the new exe before starting it, PointAt). With it off nothing is written, and a test start against
-        /// another site (--site) leaves it alone too.
+        /// Run value is written again when it doesn't start this exe (every version has its own file name, so a new file
+        /// would leave autostart on the old one; the program's own update points it at the new exe before starting it,
+        /// PointAt). With it off nothing is written, and a test start against another site (--site) leaves it alone too.
         /// </summary>
         private void EnsureAutostart()
         {
@@ -1288,34 +1475,65 @@ namespace GameMargins.Uploader
         /// <summary>The Run value pointed at `exe`, written only when it says something else.</summary>
         private static void WriteRunValue(string exe)
         {
+            // A test start in a folder of its own never touches autostart.
+            if (Program.Isolated) return;
             try
             {
                 using (var key = Registry.CurrentUser.OpenSubKey(RunKey, true))
                 {
                     if (key == null) return;
-                    var command = RunCommand(exe);
+                    var command = "\"" + exe + "\"";
                     if (string.Equals(key.GetValue(RunValue) as string, command, StringComparison.OrdinalIgnoreCase)) return;
                     key.SetValue(RunValue, command);
                 }
             }
             catch (Exception)
             {
-                // No registry access: the tick stays, Windows just won't start it.
+                // No registry access: the switch stays, Windows just won't start it.
             }
         }
 
-        /// <summary>What the Run value holds: the exe, quoted.</summary>
-        private static string RunCommand(string exe)
+        /// <summary>The languages' own names, for the list in Settings.</summary>
+        internal static string LanguageName(string code)
         {
-            return "\"" + exe + "\"";
+            switch (code)
+            {
+                case "nl": return "Nederlands";
+                case "de": return "Deutsch";
+                case "fr": return "Français";
+                case "es": return "Español";
+                case "pt-br": return "Português (Brasil)";
+                default: return "English";
+            }
         }
+
+        /// <summary>The list of languages, opened under its button in Settings, in the menu's look.</summary>
+        private void ShowLanguages(RectangleF button)
+        {
+            var lines = new List<TrayLine>();
+            foreach (var code in Texts.Languages)
+            {
+                var picked = code;
+                lines.Add(new TrayLine { Kind = code == Texts.Language ? "main" : "action", Name = code, Text = LanguageName(code), Do = delegate { PickLanguage(picked); } });
+            }
+            var menu = new ContextMenuStrip { ShowImageMargin = false, ShowCheckMargin = false, Renderer = new TrayRenderer() };
+            TrayMenu.Fill(menu, lines);
+            menu.Opened += delegate { TrayPaint.RoundCorners(menu.Handle); };
+            menu.Closed += delegate { BeginInvoke(new Action(menu.Dispose)); };
+            var zoom = _canvas.Zoom;
+            menu.Show(_canvas, new Point((int)(button.Left * zoom), (int)((button.Bottom + 4) * zoom)));
+        }
+
+        // ------------------------------------------------------------------------------------------------ show, hide, quit
 
         private void ShowWindow()
         {
+            if (_shots) return;
             _allowVisible = true;
             Show();
             WindowState = FormWindowState.Normal;
-            Activate();
+            if (!Program.TestOpen) Activate();
+            _tempo.WindowShown();
             if (_linkPaused)
             {
                 // The player is here: a fresh code, and the count starts over.
@@ -1323,22 +1541,25 @@ namespace GameMargins.Uploader
                 var flow = StartLinkFlow();
                 GC.KeepAlive(flow);
             }
+            Repaint();
         }
 
         private void OnClosing(object sender, FormClosingEventArgs e)
         {
             if (_quitting || e.CloseReason != CloseReason.UserClosing) return;
+            // The cross hides the window; the program goes on by the clock (Quit is in its menu).
             e.Cancel = true;
+            _gamesEdit = false;
+            _askAgain = false;
+            _unlinkAsk = false;
             Hide();
-            if (_hiddenOnce) return;
-            _hiddenOnce = true;
-            Notify(ToastTexts.StillRunning(), "clock", ToolTipIcon.None, 5000);
         }
 
         private void Quit()
         {
             _quitting = true;
-            _tray.Visible = false;
+            if (_tray != null) _tray.Visible = false;
+            _tempo.Dispose();
             _scanner.Dispose();
             Close();
         }
@@ -1347,9 +1568,16 @@ namespace GameMargins.Uploader
         {
             if (disposing)
             {
-                _tray.Dispose();
-                if (!ReferenceEquals(_trayIconOk, _trayIcon)) _trayIconOk.Dispose();
-                _trayIcon.Dispose();
+                Look.Changed -= OnLookChanged;
+                if (_tray != null)
+                {
+                    var menu = _tray.ContextMenuStrip;
+                    _tray.Dispose();
+                    if (menu != null) menu.Dispose();
+                    if (!ReferenceEquals(_trayIconOk, _trayIcon)) _trayIconOk.Dispose();
+                    if (!ReferenceEquals(_trayIconDot, _trayIcon)) _trayIconDot.Dispose();
+                    _trayIcon.Dispose();
+                }
                 _pollTimer.Dispose();
                 _clock.Dispose();
                 _maintain.Dispose();
@@ -1359,25 +1587,6 @@ namespace GameMargins.Uploader
                 _handOver.Dispose();
             }
             base.Dispose(disposing);
-        }
-
-        // ------------------------------------------------------------------------------------------------ Windows
-
-        [DllImport("dwmapi.dll", PreserveSig = true)]
-        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
-
-        /// <summary>A dark title bar on Windows 10 (1809 and later) and 11, like the rest of the window; nothing happens where the call is unknown.</summary>
-        private void DarkTitleBar()
-        {
-            try
-            {
-                var on = 1;
-                if (DwmSetWindowAttribute(Handle, 20, ref on, sizeof(int)) != 0) DwmSetWindowAttribute(Handle, 19, ref on, sizeof(int));
-            }
-            catch (Exception)
-            {
-                // Older Windows: a light title bar.
-            }
         }
     }
 }

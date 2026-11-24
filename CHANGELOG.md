@@ -1,5 +1,88 @@
 # Changelog
 
+## 0.4.0 (2026-11-24)
+
+GameMargins Desktop is for two games now, and it has one look.
+
+- **One look, light or dark as Windows is.** The window, the float and the menu by the clock are drawn by the program
+  itself with the same parts: one font, one button, cards with a thin edge, switches. They follow Windows' app mode
+  (Settings > Personalisation > Colours) at once, the Tempo window with them. Gold is only a page's main button and
+  links; green means it works, orange watch out, red can't.
+- **Appearance** on Settings: Follow Windows, Light or Dark. It holds for the window, the float, the menu by the
+  clock and Tempo's window, at once.
+- **The window is a list with pages**, as Tempo's: Overview, MapleStory Classic, WoW: Forever, and Settings at the
+  foot with the version. Each page has one thing and at most one gold button. Every setting of the program is on
+  Settings (Start with Windows, Keep the program up to date, Keep the addon up to date, Tempo may look at the
+  MapleStory window, Appearance, Language, Add or remove a game, Unlink); the menu by the clock has none any more. A
+  game you don't play has no page.
+- **A first start in steps**, one a screen: your language (Windows' own is already set); your games; the link, with
+  one gold button that opens gamemargins.com/link with the code filled in; and, with MapleStory Classic, the question
+  **May Tempo look at your MapleStory window?** with **Yes, Tempo may look** and **No, not now**, in green what Tempo
+  looks at and in red what it never does. With both games, WoW: Forever's link is a step of its own.
+- **+ Add a game** in the list at the left while there is a game you have not turned on; turning one off is on
+  Settings.
+- **A short menu by the clock**: first how things are ("Tempo is reading · 26 min", "WoW: uploaded 3 min ago"), then
+  what you can do: Open Tempo, Stop watching or Start watching, Upload now, Open GameMargins Desktop, Settings, Quit.
+- **Notifications only when you have to do something**: an upload the site refused, the program unlinked on the
+  site, an update that could not be installed and, with **Keep the program up to date** off, a version that waits.
+  An upload that went well shows as the green check on the icon.
+- **Updates install themselves quietly.** Afterwards Overview says "Updated to x" for a few days, with a link to what
+  is new. The version before stays on your PC as the way back: when a new version does not stay up, the old one takes
+  over again by itself and that version is not tried again. With **Keep the program up to date** off, a newer version
+  waits on Settings with **Update now** and in the menu as **Update to x.y.z**.
+- **What's new** beside that line opens gamemargins.com/whats-new at this version's entry.
+
+- **Tempo for MapleStory Classic.** Tempo, gamemargins.com's tracker (EXP, mesos and kills an hour, the time to your
+  next level, your monsters and drops), gets a window of its own in this program, titled "Tempo". The window shows the
+  site's Tempo page; the program hands that page the picture of the MapleStory window, so no browser has to share a
+  window and no "is sharing a window" bar shows.
+- **What Tempo looks at, and what never.** Only the picture of the MapleStory window, as Windows composes it for your
+  screen (Windows.Graphics.Capture, the way recording programs look at a window), without the mouse pointer (Windows
+  10 before version 2004 can't leave the pointer out). The game's window is found by its title. Never the game's process, memory, files or network; never a message, a key or a click
+  to the game; nothing drawn in or over the game. No picture leaves your PC: the page reads the numbers on your
+  computer. The program shows this once and asks for your yes before Tempo first watches. `src/Capture.cs` holds the
+  whole of it.
+- **You always see when Tempo watches.** The tray icon carries a green dot, its tooltip says "Tempo is watching
+  MapleStory", and its menu starts with "Tempo is reading" and has **Stop watching**. On Windows 11 nothing is drawn
+  around the game; Windows 10 draws its own thin yellow border around a watched window, which a program can't remove.
+- **Which Windows.** Tempo needs Windows 10 version 1903 or later, or Windows 11. On an older Windows 10 MapleStory
+  Classic's page says "Tempo can't look at the game on this Windows", and WoW: Forever works as usual.
+- **The float.** A small window over the game, in two sizes (the button next to the cross switches). Its head is
+  your session's time as a stopwatch, with the map beside it. Large: the three numbers an hour, your level with its
+  bar, your monsters, under them a row **Picked up here · not certain** that never scrolls away (what you picked up
+  whose monster isn't certain: how many, and the five items with the most), and the buttons. Small: EXP, kills and
+  mesos an hour and the next level, with a round button. The buttons work like a stopwatch: **Pause** while Tempo
+  reads; once paused, **Continue** goes on with the same session and **Reset** keeps it and waits for **Start** to
+  begin a new one. It keeps to the game as if it were part of it: on top of the game while the game is in front, and
+  behind any other window you put over the game; it hides when you minimise the game and comes back once the game is
+  there again; a drag sticks it to the game window's edges, inside and outside (also just under the title bar), and
+  to the screen's; and when it is at the game it moves along when you move the game's window. Hold it anywhere but on
+  a button to drag it. While you
+  are not in the game it says **Waiting** and what it waits for. A click on the float never takes the keyboard away
+  from the game, it is not in Alt-Tab, and it is never in the picture Tempo reads. **Lock the float (click through)**
+  in Tempo's Settings lets clicks pass through it. Under every monster of the large size stand all its drops, a small
+  picture and a count each; the arrow before a monster folds them away (until your next Reset). Rest the pointer on a
+  picture and it says the item's name. Drag the large size by its bottom right corner to make it taller (more
+  monsters) or wider: the width also makes everything in it larger, the pictures most of all (a monster's from 24 to
+  42 pixels, an item's from 14 to 32), the letters a little; the size is remembered. A locked float shows a small lock and "locked" in its head and
+  nothing that could be clicked: no buttons, no arrows, no Stop, no corner.
+- **Which games do you play?** A first start asks once: WoW: Forever, MapleStory Classic or both. Who plays
+  MapleStory alone is never asked for a WoW folder. A copy that was already in use is not asked: it stays as it is,
+  for WoW, and **+ Add a game** in the list (or **Add or remove a game** on Settings) adds MapleStory.
+- **Linking Tempo** works as for WoW: the program shows a code, you confirm it on gamemargins.com/link. Tempo has a
+  token of its own (`gm_mt_…`), kept with Windows' protection like the WoW one; it never enters the page: the program
+  adds it to the page's requests to the site's Tempo routes and to nothing else. Account › Security unlinks it.
+- **Start Tempo with MapleStory**, a switch in Tempo's Settings that is off until you set it. Only while it is on (or the Tempo window is
+  open) does the program look, every few seconds, whether a window titled "MapleStory" is open; when the game starts,
+  Tempo opens minimised and starts watching.
+- The Tempo window is Microsoft's WebView2 (Microsoft Edge's engine, part of Windows 11 and of an updated Windows 10).
+  Three files of Microsoft's WebView2 SDK travel inside the exe (`lib/webview2`, under Microsoft's licence), so it is
+  still one file with nothing to install, now about 1.4 MB and built for 64-bit Windows. The window's own data (cache)
+  is in `%LOCALAPPDATA%\GameMargins\Uploader\webview2-data`. A Windows without WebView2 gets a line with
+  Microsoft's download; the WoW side works without it.
+- The program does not update itself while a Tempo session runs.
+- WoW: Forever uploads as before; its accounts, folder, addon and last uploads are together on its page.
+
 ## 0.2.6 (2026-11-12)
 
 - The notification after an upload names the auction house again. Windows' notification center shows a notification

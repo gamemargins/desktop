@@ -1,4 +1,4 @@
-// The program keeping itself up to date: "Keep the program up to date" in the tray menu, on by default; with it off the
+// The program keeping itself up to date: "Keep the program up to date" on Settings, on by default; with it off the
 // menu offers "Update to x.y.z" instead and one click does the same. At start and once a day the program reads one small
 // file from our site, https://gamemargins.com/wow-forever/uploader.json, which names the newest version, its exe on the
 // public repository's GitHub release and that exe's SHA-256. The request carries nothing but the program's user agent:
@@ -190,7 +190,7 @@ namespace GameMargins.Uploader
             return host == "github.com" && to.AbsolutePath.StartsWith(new Uri(ReleasePrefix).AbsolutePath, StringComparison.Ordinal);
         }
 
-        /// <summary>The site's version file, { "version", "url", "sha256" }, when every part of it is acceptable; null otherwise.</summary>
+        /// <summary>The release the site's version file names, { "version", "url", "sha256" }, when every part of it is acceptable; null otherwise.</summary>
         public static ProgramRelease ReadVersionFile(string text)
         {
             var json = Json.Parse(text);
@@ -294,17 +294,56 @@ namespace GameMargins.Uploader
 
         /// <summary>
         /// Whether the hand-over to a new exe may happen now: no upload and no addon install under way, no dialog open, and
-        /// for an update by itself no open window either (after a click on "Update to" the player is expecting it).
+        /// for an update by itself no open window either (after a click on "Update to" the player is expecting it). Never
+        /// while a Tempo session runs (Tempo reads, or is paused with numbers): the update waits until it is stopped or reset.
         /// </summary>
-        public static bool MayHandOver(int uploadsRunning, bool addonBusy, bool dialogOpen, bool windowOpen, bool clicked)
+        public static bool MayHandOver(int uploadsRunning, bool addonBusy, bool dialogOpen, bool windowOpen, bool clicked, bool tempoSession = false)
         {
-            return uploadsRunning == 0 && !addonBusy && !dialogOpen && (clicked || !windowOpen);
+            return uploadsRunning == 0 && !addonBusy && !dialogOpen && !tempoSession && (clicked || !windowOpen);
         }
 
         /// <summary>A path as one command-line argument.</summary>
         public static string Quote(string path)
         {
             return "\"" + path.TrimEnd('\\') + "\"";
+        }
+
+        /// <summary>Whether the last Check got the site's version file: only then may the window say "up to date".</summary>
+        public bool Reached;
+
+        /// <summary>Starts `exe` with `arguments` and answers its process (the caller watches whether it stays up); null when Windows would not start it.</summary>
+        public static Process StartProcess(string exe, string arguments)
+        {
+            try
+            {
+                return Process.Start(new ProcessStartInfo(exe, arguments) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe) });
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>How long the copy that handed over stands by to see the new one stay up.</summary>
+        public const int StandBySeconds = 30;
+
+        /// <summary>
+        /// The way back after a hand-over: true when the new copy ended within `seconds` with an error (it could not
+        /// start, or fell over at once), so the old copy must take over again. A new copy that is still up after that, or
+        /// that the player quit (it ends with 0), stays.
+        /// </summary>
+        public static bool FellOver(Process started, int seconds)
+        {
+            try
+            {
+                if (started == null) return true;
+                if (!started.WaitForExit(seconds * 1000)) return false;
+                return started.ExitCode != 0;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
         }
 
         /// <summary>Starts `exe` with `arguments`; false when Windows would not start it.</summary>
@@ -329,6 +368,7 @@ namespace GameMargins.Uploader
         public async Task<ProgramRelease> Check()
         {
             WebAnswer answer;
+            Reached = false;
             try
             {
                 answer = await _web.Get(VersionFile, MaxVersionFileBytes).ConfigureAwait(false);
@@ -338,6 +378,7 @@ namespace GameMargins.Uploader
                 return null;
             }
             if (answer == null || answer.Status != 200 || answer.Body == null) return null;
+            Reached = true;
             string text;
             try { text = new UTF8Encoding(false, true).GetString(answer.Body); }
             catch (Exception) { return null; }
@@ -429,6 +470,25 @@ namespace GameMargins.Uploader
                 }
                 await Task.Delay(1000);
             }
+        }
+
+        /// <summary>
+        /// After an update: the copy it replaced stays as the way back; every older copy the program installed in
+        /// `folder` goes (never the running one, never a copy elsewhere: a download on the desktop is the player's).
+        /// </summary>
+        public static async Task RemoveOlder(string folder, string replaced, string running)
+        {
+            await Task.Delay(3000);
+            try
+            {
+                if (!Directory.Exists(folder)) return;
+                foreach (var file in Directory.GetFiles(folder, ExePrefix + "*.exe"))
+                {
+                    if (!InstalledName.IsMatch(Path.GetFileName(file)) || SamePath(file, running) || SamePath(file, replaced)) continue;
+                    Delete(file);
+                }
+            }
+            catch (Exception) { }
         }
 
         private static string HashOfFile(string path)

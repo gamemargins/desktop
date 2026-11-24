@@ -1,8 +1,12 @@
 // What the program remembers between starts, in %LOCALAPPDATA%\GameMargins\Uploader\settings.json: the site the
-// token belongs to, the token (protected with DPAPI for this Windows user: another user or another computer can't read
-// it), the WoW folder, the account's language, the three ticks of the tray menu, the newest program version a
-// notification already announced, the hashes of the files already uploaded (so a restart doesn't send them again) and
-// the last uploads the window lists. Never an account folder name, never the file itself.
+// tokens belong to, the WoW token (protected with DPAPI for this Windows user: another user or another computer can't
+// read it), the WoW folder, the language, the switches of the window's Settings (Start with Windows, Keep the program
+// up to date, Keep the addon up to date, Appearance), the newest program version a notification already announced,
+// the version the program last updated itself to and one that did not stay up, the hashes of the files already
+// uploaded (so a restart doesn't send them again) and the last uploads the window lists. Never an account folder
+// name, never the file itself. For Tempo: which games the program is used for, Tempo's own token (protected the same
+// way), whether the player read what Tempo looks at and said yes, Tempo's own switches (Start Tempo with MapleStory,
+// Show the float, Lock the float), and where its window and its float stood.
 
 using System;
 using System.Collections.Generic;
@@ -32,13 +36,13 @@ namespace GameMargins.Uploader
         public string Site;
         public string WowFolder;
         public string Locale;
-        /// <summary>The tray's "Start with Windows": on from the first link unless turned off.</summary>
+        /// <summary>Settings' "Start with Windows": on from the first link unless turned off.</summary>
         public bool StartWithWindows;
         /// <summary>Whether the first link already switched the autostart on, so a player's later "off" stays off.</summary>
         public bool AutostartDecided;
-        /// <summary>The tray's "Keep the addon up to date": on by default; off for players who use CurseForge or Wago.</summary>
+        /// <summary>Settings' "Keep the addon up to date": on by default; off for players who use CurseForge or Wago.</summary>
         public bool KeepAddonUpdated = true;
-        /// <summary>The tray's "Keep the program up to date": on by default; off, the menu offers "Update to x.y.z" instead.</summary>
+        /// <summary>Settings' "Keep the program up to date": on by default; off, a newer version waits for a click ("Update now" on Settings, "Update to x.y.z" in the menu).</summary>
         public bool KeepProgramUpdated = true;
         /// <summary>The newer version the "Version x.y.z is ready" notification announced, so it comes once per version.</summary>
         public string UpdateNoted;
@@ -47,9 +51,52 @@ namespace GameMargins.Uploader
         public List<string> Uploaded = new List<string>();
         public List<UploadRow> Uploads = new List<UploadRow>();
 
+        /// <summary>Whether "Which games do you play?" was answered. A settings file from before 0.4.0 counts as answered: WoW.</summary>
+        public bool GamesAsked;
+        public bool Wow;
+        public bool Maple;
+        /// <summary>Tempo's token (scope ms-tempo), in the clear while the program runs; stored protected, apart from the WoW token.</summary>
+        public string TempoToken;
+        /// <summary>The player read what Tempo looks at and said yes; asked once, before Tempo first watches.</summary>
+        public bool TempoConsent;
+        /// <summary>"Start Tempo with MapleStory": off unless the player ticks it. Only while on does the program look for the game's window by itself.</summary>
+        public bool StartTempoWithGame;
+        /// <summary>"Show the float": the small always-on-top window, shown while Tempo is open.</summary>
+        public bool FloatShown = true;
+        /// <summary>"Lock the float (click through)".</summary>
+        public bool FloatLocked;
+        /// <summary>The float's size: "large" or "small".</summary>
+        public string FloatSize = "large";
+        /// <summary>The size the player dragged the large float to ("320,460", pixels at 96 dpi); null until they do.</summary>
+        public string FloatLarge;
+        /// <summary>Light or dark: "system" (as Windows is), "light" or "dark".</summary>
+        public string Appearance = "system";
+        /// <summary>The first start's language step was gone through (a copy from before it is not asked).</summary>
+        public bool LanguageAsked;
+        /// <summary>This copy's first start had the language step: the step bars count it.</summary>
+        public bool LanguageStep;
+        /// <summary>Where the float's top right corner stood, "x,y", per arrangement of screens.</summary>
+        public Dictionary<string, string> FloatPlaces = new Dictionary<string, string>();
+        /// <summary>The Tempo window's place and size, "x,y,w,h"; null until it was moved.</summary>
+        public string TempoBounds;
+        /// <summary>The first start's steps were gone through once: after that a step that comes back (a link the site dropped) shows without the step bars.</summary>
+        public bool SetupDone;
+        /// <summary>The question "May Tempo look at your MapleStory window?" was answered, with yes or with "No, not now".</summary>
+        public bool TempoAsked;
+        /// <summary>The language was picked in Settings: the account's language on the site no longer changes it.</summary>
+        public bool LocalePicked;
+        /// <summary>The version the program last updated itself to and when, for the window's line "Updated to x last night".</summary>
+        public string UpdatedTo;
+        public DateTime UpdatedAt;
+        /// <summary>A version that did not stay up after an update: not installed again, and never started in place of this one.</summary>
+        public string UpdateBad;
+
+        /// <summary>Another folder for everything the program keeps (--data, for a test next to an installed copy); null: the real one.</summary>
+        public static string FolderOverride;
+
         public static string Folder
         {
-            get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Path.Combine("GameMargins", "Uploader")); }
+            get { return FolderOverride ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Path.Combine("GameMargins", "Uploader")); }
         }
 
         private static string File
@@ -65,6 +112,32 @@ namespace GameMargins.Uploader
                 if (!System.IO.File.Exists(File)) return s;
                 var json = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(System.IO.File.ReadAllText(File, Encoding.UTF8));
                 if (json == null) return s;
+                // A file from before 0.4.0 has no games in it: that copy was used for WoW, and is not asked.
+                s.GamesAsked = !Json.Has(json, "gamesAsked") || Json.Bool(json, "gamesAsked");
+                s.Wow = Json.Has(json, "wow") ? Json.Bool(json, "wow") : !Json.Has(json, "gamesAsked");
+                s.Maple = Json.Bool(json, "maple");
+                s.TempoToken = Unprotect(Json.Str(json, "tempoToken"));
+                s.TempoConsent = Json.Bool(json, "tempoConsent");
+                s.StartTempoWithGame = Json.Bool(json, "startTempoWithGame");
+                s.FloatShown = !Json.Has(json, "floatShown") || Json.Bool(json, "floatShown");
+                s.FloatLocked = Json.Bool(json, "floatLocked");
+                s.FloatSize = Json.Str(json, "floatSize") == "small" ? "small" : "large";
+                s.FloatLarge = Json.Str(json, "floatLarge");
+                var appearance = Json.Str(json, "appearance");
+                s.Appearance = appearance == "light" || appearance == "dark" ? appearance : "system";
+                // A settings file from before the language step is a copy in use: its language stays as it is.
+                s.LanguageAsked = !Json.Has(json, "languageAsked") || Json.Bool(json, "languageAsked");
+                s.LanguageStep = Json.Bool(json, "languageStep");
+                s.TempoBounds = Json.Str(json, "tempoBounds");
+                s.SetupDone = Json.Bool(json, "setupDone");
+                s.TempoAsked = Json.Bool(json, "tempoAsked") || s.TempoConsent;
+                s.LocalePicked = Json.Bool(json, "localePicked");
+                s.UpdatedTo = Json.Str(json, "updatedTo");
+                DateTime updatedAt;
+                if (DateTime.TryParse(Json.Str(json, "updatedAt"), null, System.Globalization.DateTimeStyles.RoundtripKind, out updatedAt)) s.UpdatedAt = updatedAt;
+                s.UpdateBad = Json.Str(json, "updateBad");
+                var places = Json.Object(json, "floatPlaces");
+                if (places != null) foreach (var place in places) if (place.Value is string) s.FloatPlaces[place.Key] = (string)place.Value;
                 s.Site = Json.Str(json, "site");
                 s.WowFolder = Json.Str(json, "wowFolder");
                 s.Locale = Json.Str(json, "locale");
@@ -118,6 +191,27 @@ namespace GameMargins.Uploader
                     { "token", Protect(Token) },
                     { "uploaded", Uploaded },
                     { "uploads", uploads },
+                    { "gamesAsked", GamesAsked },
+                    { "wow", Wow },
+                    { "maple", Maple },
+                    { "tempoToken", Protect(TempoToken) },
+                    { "tempoConsent", TempoConsent },
+                    { "startTempoWithGame", StartTempoWithGame },
+                    { "floatShown", FloatShown },
+                    { "floatLocked", FloatLocked },
+                    { "floatSize", FloatSize },
+                    { "floatLarge", FloatLarge },
+                    { "appearance", Appearance },
+                    { "languageAsked", LanguageAsked },
+                    { "languageStep", LanguageStep },
+                    { "floatPlaces", FloatPlaces },
+                    { "tempoBounds", TempoBounds },
+                    { "setupDone", SetupDone },
+                    { "tempoAsked", TempoAsked },
+                    { "localePicked", LocalePicked },
+                    { "updatedTo", UpdatedTo },
+                    { "updatedAt", UpdatedAt == default(DateTime) ? null : UpdatedAt.ToUniversalTime().ToString("o") },
+                    { "updateBad", UpdateBad },
                 };
                 var text = new JavaScriptSerializer().Serialize(json);
                 var tmp = File + ".tmp";
@@ -186,6 +280,14 @@ namespace GameMargins.Uploader
         {
             object v;
             return d != null && d.TryGetValue(key, out v) && v is bool && (bool)v;
+        }
+
+        public static double Number(Dictionary<string, object> d, string key)
+        {
+            object v;
+            if (d == null || !d.TryGetValue(key, out v) || v == null) return 0;
+            try { return Convert.ToDouble(v, System.Globalization.CultureInfo.InvariantCulture); }
+            catch (Exception) { return 0; }
         }
 
         public static long Long(Dictionary<string, object> d, string key)

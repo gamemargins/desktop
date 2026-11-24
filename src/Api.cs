@@ -1,7 +1,8 @@
 // The site's routes the program talks to (/api/wow/uploader/…): the device flow that links it
 // (link, link/poll), the status check (the token still good, the account's language, the versions the site offers,
 // the addon zip with its hash), the upload itself with "Authorization: Bearer gm_wu_…", and the plain download of
-// the addon zip. Nothing else on the site takes that token.
+// the addon zip. Nothing else on the site takes that token. Tempo has routes of its own (/api/maplestory/tempo-desktop/…):
+// the same device flow for its own token (gm_mt_…), and the start, which says which page the Tempo window loads.
 
 using System;
 using System.Collections.Generic;
@@ -51,6 +52,15 @@ namespace GameMargins.Uploader
         public AddonInfo Addon;
     }
 
+    internal sealed class TempoStartResult
+    {
+        /// <summary>ok, unlinked (401), refused (403: the account can't use Tempo yet) or offline.</summary>
+        public string Status;
+        public string Locale;
+        /// <summary>The Tempo page's address, as the site gave it.</summary>
+        public string Url;
+    }
+
     internal sealed class ScanResult
     {
         public string Status;
@@ -87,11 +97,34 @@ namespace GameMargins.Uploader
             _http.DefaultRequestHeaders.UserAgent.ParseAdd("GameMarginsDesktop/" + Program.Version + " (Windows)");
         }
 
-        public async Task<LinkStart> StartLink()
+        public const string WowLink = "api/wow/uploader/link";
+        public const string TempoLink = "api/maplestory/tempo-desktop/link";
+
+        /// <summary>Asks the site which page the Tempo window loads; the answer also says whether the token is still good.</summary>
+        public async Task<TempoStartResult> TempoStart(string token)
         {
             try
             {
-                var res = await _http.PostAsync("api/wow/uploader/link", new StringContent("", Encoding.UTF8, "application/json")).ConfigureAwait(false);
+                var req = new HttpRequestMessage(HttpMethod.Get, "api/maplestory/tempo-desktop/start");
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                var res = await _http.SendAsync(req).ConfigureAwait(false);
+                if (res.StatusCode == HttpStatusCode.Unauthorized) return new TempoStartResult { Status = "unlinked" };
+                if (res.StatusCode == HttpStatusCode.Forbidden) return new TempoStartResult { Status = "refused" };
+                var json = Json.Parse(await res.Content.ReadAsStringAsync().ConfigureAwait(false));
+                if (!res.IsSuccessStatusCode || json == null || string.IsNullOrEmpty(Json.Str(json, "url"))) return new TempoStartResult { Status = "offline" };
+                return new TempoStartResult { Status = "ok", Locale = Json.Str(json, "locale"), Url = Json.Str(json, "url") };
+            }
+            catch (Exception)
+            {
+                return new TempoStartResult { Status = "offline" };
+            }
+        }
+
+        public async Task<LinkStart> StartLink(string route = WowLink)
+        {
+            try
+            {
+                var res = await _http.PostAsync(route, new StringContent("", Encoding.UTF8, "application/json")).ConfigureAwait(false);
                 if (!res.IsSuccessStatusCode) return null;
                 var json = Json.Parse(await res.Content.ReadAsStringAsync().ConfigureAwait(false));
                 if (json == null) return null;
@@ -112,12 +145,12 @@ namespace GameMargins.Uploader
             }
         }
 
-        public async Task<PollResult> Poll(string deviceCode)
+        public async Task<PollResult> Poll(string deviceCode, string route = WowLink)
         {
             try
             {
                 var body = Json.Write(new Dictionary<string, object> { { "deviceCode", deviceCode } });
-                var res = await _http.PostAsync("api/wow/uploader/link/poll", new StringContent(body, Encoding.UTF8, "application/json")).ConfigureAwait(false);
+                var res = await _http.PostAsync(route + "/poll", new StringContent(body, Encoding.UTF8, "application/json")).ConfigureAwait(false);
                 var json = Json.Parse(await res.Content.ReadAsStringAsync().ConfigureAwait(false));
                 if (res.StatusCode == HttpStatusCode.Gone) return new PollResult { Status = "expired" };
                 if (res.StatusCode == HttpStatusCode.NotFound) return new PollResult { Status = "unknown" };

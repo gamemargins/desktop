@@ -1,6 +1,7 @@
 // The tray icon after an upload that stored a scan: the site's mark with a small green check in its corner for ten
 // minutes, green being "done" in the site's colours (its positive colour, #1baf7a), with a tooltip that says what was
-// uploaded when (MainForm.RefreshTray).
+// uploaded when (MainForm.RefreshTray). While Tempo watches the MapleStory window the icon carries a plain green dot
+// instead (WithDot), so the player sees by the clock that the game is being looked at.
 // Drawn here from the normal icon at the tray's size, so GameMargins.ico stays the one picture of the program.
 
 using System;
@@ -19,6 +20,46 @@ namespace GameMargins.Uploader
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool DestroyIcon(IntPtr hIcon);
+
+        /// <summary>`normal` with a plain green dot over its bottom-right corner, `size` pixels square: Tempo is watching the game.</summary>
+        public static Icon WithDot(Icon normal, int size)
+        {
+            using (var bitmap = new Bitmap(size, size, PixelFormat.Format32bppArgb))
+            {
+                using (var g = Graphics.FromImage(bitmap))
+                {
+                    g.SmoothingMode = SmoothingMode.AntiAlias;
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    g.DrawIcon(normal, new Rectangle(0, 0, size, size));
+                    var d = Math.Max(7f, size * 0.44f);
+                    var disc = new RectangleF(size - d, size - d, d, d);
+                    using (var rim = new SolidBrush(Rim)) g.FillEllipse(rim, RectangleF.Inflate(disc, 1f, 1f));
+                    using (var fill = new SolidBrush(Green)) g.FillEllipse(fill, disc);
+                }
+                var handle = bitmap.GetHicon();
+                try
+                {
+                    return (Icon)Icon.FromHandle(handle).Clone();
+                }
+                finally
+                {
+                    DestroyIcon(handle);
+                }
+            }
+        }
+
+        /// <summary>A green dot as a small picture, for the menu's line that says Tempo is watching.</summary>
+        public static Bitmap Dot(int size)
+        {
+            var bitmap = new Bitmap(size, size, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(bitmap))
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                var d = size * 0.5f;
+                using (var fill = new SolidBrush(Green)) g.FillEllipse(fill, (size - d) / 2, (size - d) / 2, d, d);
+            }
+            return bitmap;
+        }
 
         /// <summary>`normal` with a green disc and a white check over its bottom-right corner, `size` pixels square.</summary>
         public static Icon WithCheck(Icon normal, int size)
