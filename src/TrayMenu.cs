@@ -1,10 +1,12 @@
 // The menu of the icon by the clock (a right click). It is short: it starts with
-// two lines that say how things are, a dot before each ("Tempo is reading · 26 min", "WoW: uploaded 3 min ago"; green
-// = works, orange = watch out, red = can't, grey = off), then only what can be done: Open Tempo (the main one, bold),
-// Stop watching or Start watching, Upload now; then Open GameMargins Desktop, Settings and Quit. No ticks: every
-// setting has one place, the window's Settings (and Tempo's own, in Tempo). A game the program is not used for has
-// no line; where Tempo can't be used its status line stays and there is no Open Tempo. While "Keep the program up to date" is off and a newer version waits, "Update to x.y.z" is the first thing
-// to do. The menu is drawn by the program (TrayPaint), light or dark as Windows is, so it is one with the window.
+// two lines that say how things are, a dot before each ("Tempo reads MapleStory · session not started", "WoW: uploaded 3
+// min ago"; green = works, orange = watch out, red = can't, grey = off), then only what can be done: Open Tempo (the main
+// one, bold), Start session, Pause session or Continue session (Tempo reads the game whenever it is open; these are the
+// farm session's alone), Upload now; then Open GameMargins Desktop, Settings and Quit. No ticks: every setting has one
+// place, the window's Settings (and Tempo's own, in Tempo). A game the program is not used for has no line; where Tempo
+// can't be used its status line stays and there is no Open Tempo. While "Keep the program up to date" is off and a
+// newer version waits, "Update to x.y.z" is the first thing to do. The menu is drawn by the program (TrayPaint), light
+// or dark as Windows is, so it is one with the window.
 
 using System;
 using System.Collections.Generic;
@@ -28,10 +30,14 @@ namespace GameMargins.Uploader
         public string WowTone = "";
         /// <summary>Tempo can be opened (linked, and the question answered with yes).</summary>
         public bool TempoReady;
+        /// <summary>The player turned looking off himself: "Turn Tempo back on" in place of "Open Tempo" (the owner's pick 3 A of 25 November 2026).</summary>
+        public bool TempoTurnedOff;
         /// <summary>Tempo can't be used for now (the site refused to open it, or this Windows can't look): its status line stays, "Open Tempo" goes.</summary>
         public bool TempoShut;
-        /// <summary>Tempo reads right now: "Stop watching"; else "Start watching".</summary>
-        public bool Watching;
+        /// <summary>The farm session: "idle" (Start session), "reading" (Pause session) or "paused" (Continue session).</summary>
+        public string Session = "idle";
+        /// <summary>MapleStory's window is there: without it a session can't start or go on, and those lines are grey.</summary>
+        public bool GameThere;
         /// <summary>WoW is linked: "Upload now" works.</summary>
         public bool WowReady;
         /// <summary>A newer version the player updates to with a click ("Keep the program up to date" off); null when there is none.</summary>
@@ -44,8 +50,8 @@ namespace GameMargins.Uploader
         public Action UploadNow;
         public Action Quit;
         public Action OpenTempo;
-        public Action StopWatching;
-        public Action StartWatching;
+        public Action StartSession;
+        public Action PauseSession;
         public Action OpenWindow;
         public Action OpenSettings;
     }
@@ -74,11 +80,14 @@ namespace GameMargins.Uploader
             if (!string.IsNullOrEmpty(state.UpdateTo)) lines.Add(new TrayLine { Kind = "main", Name = "update", Text = Texts.T("Update to {0}", state.UpdateTo), Do = actions.Update });
             if (state.Maple && !state.TempoShut)
             {
-                lines.Add(new TrayLine { Kind = string.IsNullOrEmpty(state.UpdateTo) ? "main" : "action", Name = "open-tempo", Text = Texts.T("Open Tempo"), Do = actions.OpenTempo });
+                // Both open the question when Tempo may not look (OpenTempoOrWindow); turned off by the player, the line says what it does.
+                if (state.TempoTurnedOff) lines.Add(new TrayLine { Kind = string.IsNullOrEmpty(state.UpdateTo) ? "main" : "action", Name = "turn-on", Text = Texts.T("Turn Tempo back on"), Do = actions.OpenTempo });
+                else lines.Add(new TrayLine { Kind = string.IsNullOrEmpty(state.UpdateTo) ? "main" : "action", Name = "open-tempo", Text = Texts.T("Open Tempo"), Do = actions.OpenTempo });
                 if (state.TempoReady)
                 {
-                    if (state.Watching) lines.Add(new TrayLine { Name = "stop-watching", Text = Texts.T("Stop watching"), Do = actions.StopWatching });
-                    else lines.Add(new TrayLine { Name = "start-watching", Text = Texts.T("Start watching"), Do = actions.StartWatching });
+                    if (state.Session == "reading") lines.Add(new TrayLine { Name = "pause-session", Text = Texts.T("Pause session"), Do = actions.PauseSession });
+                    else if (state.Session == "paused") lines.Add(new TrayLine { Name = "continue-session", Text = Texts.T("Continue session"), Do = actions.StartSession, Enabled = state.GameThere });
+                    else lines.Add(new TrayLine { Name = "start-session", Text = Texts.T("Start session"), Do = actions.StartSession, Enabled = state.GameThere });
                 }
             }
             if (state.Wow) lines.Add(new TrayLine { Name = "upload", Text = Texts.T("Upload now"), Do = actions.UploadNow, Enabled = state.WowReady });
@@ -89,20 +98,56 @@ namespace GameMargins.Uploader
             return lines;
         }
 
-        /// <summary>An empty menu in the program's look; `fill` puts its lines in each time it opens, so the minutes are right.</summary>
+        /// <summary>
+        /// An empty menu in the program's look; `fill` puts its lines in each time it opens, so the minutes are right, at the
+        /// scale of the screen the pointer is on (where the menu opens).
+        /// </summary>
         public static ContextMenuStrip Make(Func<List<TrayLine>> fill)
         {
             var menu = new ContextMenuStrip { ShowImageMargin = false, ShowCheckMargin = false, Renderer = new TrayRenderer(), AutoSize = false, DropShadowEnabled = true };
             // A menu needs a line to open at all; the real ones come in Opening.
             menu.Items.Add(new ToolStripMenuItem(" "));
-            menu.Opening += delegate { Fill(menu, fill()); };
+            menu.Opening += delegate { Fill(menu, fill(), MonitorScale.At(Cursor.Position)); };
             menu.Opened += delegate { TrayPaint.RoundCorners(menu.Handle); };
             return menu;
         }
 
+        /// <summary>
+        /// Opens the menu by the clock at the pointer, on the screen the pointer is on, at that screen's own scale: filled
+        /// first, so its size is known before it is placed (the menu above and to the left of the pointer, as Windows'
+        /// own menus by the clock; below it or to its right where there is no room). Before this the menu was placed by
+        /// its size of the time before, at the main screen's scale, and opened far from the icon when that was not right:
+        /// from the hidden icons, on a screen of another scale. Answers where it was put (to check it against the screen).
+        /// </summary>
+        public static Rectangle ShowAt(ContextMenuStrip menu, List<TrayLine> lines, Point pointer)
+        {
+            var scale = MonitorScale.At(pointer);
+            Fill(menu, lines, scale);
+            var place = Place(pointer, menu.Size, Screen.FromPoint(pointer).Bounds);
+            menu.Show(place.Location, ToolStripDropDownDirection.BelowRight);
+            return place;
+        }
+
+        /// <summary>
+        /// Where a menu of `size` opens for a pointer at `pointer` on a screen of `screen`: its bottom right corner at the
+        /// pointer; with no room above it, its top right corner; with no room at the left, its left side at the pointer;
+        /// and never past the screen's edges.
+        /// </summary>
+        internal static Rectangle Place(Point pointer, Size size, Rectangle screen)
+        {
+            var x = pointer.X - size.Width;
+            var y = pointer.Y - size.Height;
+            if (y < screen.Top) y = pointer.Y;
+            if (x < screen.Left) x = pointer.X;
+            x = Math.Max(screen.Left, Math.Min(x, screen.Right - size.Width));
+            y = Math.Max(screen.Top, Math.Min(y, screen.Bottom - size.Height));
+            return new Rectangle(x, y, size.Width, size.Height);
+        }
+
+        /// <summary>The lines into the menu at the scale of the screen the pointer is on.</summary>
         public static void Fill(ContextMenuStrip menu, List<TrayLine> lines)
         {
-            Fill(menu, lines, TrayPaint.ScreenScale());
+            Fill(menu, lines, MonitorScale.At(Cursor.Position));
         }
 
         /// <summary>The lines into the menu at a screen's scale (the pictures' check fills one at every scale, never shown).</summary>
@@ -154,7 +199,7 @@ namespace GameMargins.Uploader
         private static readonly Bitmap Scrap = new Bitmap(1, 1);
         private static readonly Graphics Ruler = Graphics.FromImage(Scrap);
 
-        /// <summary>The main screen's scale (the icon by the clock lives there).</summary>
+        /// <summary>The main screen's scale (only where no screen's own can be asked: MonitorScale is per screen).</summary>
         public static float ScreenScale()
         {
             try { using (var g = Graphics.FromHwnd(IntPtr.Zero)) return Math.Max(1f, g.DpiX / 96f); } catch (Exception) { return 1f; }
@@ -290,6 +335,40 @@ namespace GameMargins.Uploader
                 y += h;
             }
             g.ResetTransform();
+        }
+    }
+
+    /// <summary>
+    /// The scale Windows gives each screen (100%, 125%, 150%, …), asked of that screen itself: with screens of different
+    /// scales, the main screen's says nothing about the others.
+    /// </summary>
+    internal static class MonitorScale
+    {
+        [StructLayout(LayoutKind.Sequential)] private struct NativePoint { public int X, Y; }
+        [DllImport("user32.dll")] private static extern IntPtr MonitorFromPoint(NativePoint point, uint flags);
+        [DllImport("user32.dll")] private static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
+        [DllImport("shcore.dll")] private static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint x, out uint y);
+        private const uint MONITOR_DEFAULTTONEAREST = 2;
+        private const int MDT_EFFECTIVE_DPI = 0;
+
+        /// <summary>The scale of the screen `point` is on (the nearest one when it is on none): 1 at 96 dpi.</summary>
+        public static float At(Point point)
+        {
+            try { return Of(MonitorFromPoint(new NativePoint { X = point.X, Y = point.Y }, MONITOR_DEFAULTTONEAREST)); } catch (Exception) { return TrayPaint.ScreenScale(); }
+        }
+
+        /// <summary>The scale of the screen most of `window` is on (the game's window, of whatever program).</summary>
+        public static float OfWindow(IntPtr window)
+        {
+            try { return Of(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST)); } catch (Exception) { return TrayPaint.ScreenScale(); }
+        }
+
+        /// <summary>The scale of the screen `monitor` (a handle Windows gave for it): 1 at 96 dpi.</summary>
+        internal static float Of(IntPtr monitor)
+        {
+            uint x, y;
+            if (monitor == IntPtr.Zero || GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, out x, out y) != 0 || x == 0) return TrayPaint.ScreenScale();
+            return Math.Max(1f, x / 96f);
         }
     }
 

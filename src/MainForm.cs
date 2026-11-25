@@ -46,6 +46,8 @@ namespace GameMargins.Uploader
         private readonly Scanner _scanner = new Scanner();
         private readonly Addon _addon;
         private readonly NotifyIcon _tray;
+        /// <summary>The menu by the clock (TrayMenu), opened by ShowTrayMenu.</summary>
+        private readonly ContextMenuStrip _trayMenu;
         private readonly Icon _trayIcon;
         /// <summary>The same icon with the green check (TrayBadge), for the ten minutes after a stored scan.</summary>
         private readonly Icon _trayIconOk;
@@ -89,6 +91,8 @@ namespace GameMargins.Uploader
         private bool _wowBegun;
 
         private bool _allowVisible;
+        /// <summary>The window has been shown (and placed by Windows) before: a later showing checks that its place still shows.</summary>
+        private bool _shownBefore;
         private bool _quitting;
         private LinkStart _link;
         private bool _polling;
@@ -103,6 +107,8 @@ namespace GameMargins.Uploader
         /// <summary>A folder picker is open: the hand-over to a new exe waits for it.</summary>
         private bool _dialogOpen;
         private bool _tempoDirty;
+        /// <summary>The screens while the program runs (Screens.cs); null in a --shots start.</summary>
+        private ScreenWatch _screens;
 
         /// <summary>A newer version waiting for the player's click ("Keep the program up to date" off); null when there is none.</summary>
         private ProgramRelease _offered;
@@ -111,6 +117,8 @@ namespace GameMargins.Uploader
         private string _skipVersion;
         /// <summary>The checked new exe this copy hands over to once nothing is under way, and for which version; null before.</summary>
         private string _handOverTo;
+        /// <summary>Tempo's page is sending what it read before the hand-over.</summary>
+        private bool _handingOver;
         private ProgramRelease _handOverRelease;
         /// <summary>Whether that update came from a click on "Update now", which doesn't wait for the window to be closed.</summary>
         private bool _handOverClicked;
@@ -165,7 +173,9 @@ namespace GameMargins.Uploader
             _tray.MouseClick += delegate(object s, MouseEventArgs e) { if (e.Button == MouseButtons.Left) ShowWindow(); };
             _tray.DoubleClick += delegate { ShowWindow(); };
             _tray.BalloonTipClicked += delegate { ShowWindow(); };
-            _tray.ContextMenuStrip = TrayMenu.Make(TrayLines);
+            // The menu is opened by the program itself (ShowTrayMenu), at the pointer and at its screen's own scale.
+            _trayMenu = TrayMenu.Make(TrayLines);
+            _tray.MouseUp += delegate(object s, MouseEventArgs e) { if (e.Button == MouseButtons.Right) ShowTrayMenu(); };
             RefreshTray();
 
             _pollTimer.Tick += async delegate { await PollOnce(); };
@@ -209,6 +219,8 @@ namespace GameMargins.Uploader
             // The window exists from the start (timers, Invoke) but shows only when something asks for it: a program that
             // is set up starts by the clock, one that is not shows the step that is open.
             CreateHandle();
+            // A screen switched off, unplugged or arranged anew: what stood on it comes where it shows (Screens.cs).
+            _screens = new ScreenWatch(this, CheckScreens, WindowsText);
             BeginInvoke(new Action(async delegate { await Begin(); }));
         }
 
@@ -255,6 +267,15 @@ namespace GameMargins.Uploader
                 Zoom(Math.Max(1f, (m.WParam.ToInt64() & 0xFFFF) / 96f));
                 return;
             }
+            // WM_DISPLAYCHANGE, which Windows sends every top-level window, shown or not: the screens changed. Taken up
+            // after Windows' message is done with.
+            if (m.Msg == 0x007E && _screens != null && !_quitting)
+            {
+                try { BeginInvoke(new Action(delegate { if (_screens != null) _screens.Changed("WM_DISPLAYCHANGE"); })); } catch (Exception) { }
+            }
+            // WM_ENTERSIZEMOVE and WM_EXITSIZEMOVE: the player moves the window; no check takes it from under the pointer.
+            if (m.Msg == 0x0231) _sizeMove = true;
+            else if (m.Msg == 0x0232) _sizeMove = false;
             base.WndProc(ref m);
         }
 
@@ -276,6 +297,53 @@ namespace GameMargins.Uploader
                 _tempo.LookChanged();
             }
             catch (Exception) { }
+        }
+
+        /// <summary>
+        /// The screens changed just now (`afterChange`: one switched off or unplugged, the layout changed in Windows' display
+        /// settings), or it is the look every two seconds (ScreenWatch): the window, the Tempo window and (after a change)
+        /// the float each go where they show, the float to its place at the game.
+        /// </summary>
+        private void CheckScreens(ScreenInfo[] screens, bool afterChange)
+        {
+            if (_quitting || IsDisposed) return;
+            KeepOnScreen(screens, afterChange);
+            _tempo.ScreensChanged(screens, afterChange);
+        }
+
+        /// <summary>Where the windows stand, for tempo.log's line about the screens.</summary>
+        private string WindowsText()
+        {
+            string main;
+            if (WindowState == FormWindowState.Minimized) main = "minimised";
+            else main = (Visible ? "shown at " : "hidden at ") + ScreenPlace.Text(Bounds);
+            return _tempo.WindowText() + "; the main window: " + main;
+        }
+
+        /// <summary>The player moves or sizes the window (between WM_ENTERSIZEMOVE and WM_EXITSIZEMOVE).</summary>
+        private bool _sizeMove;
+
+        /// <summary>
+        /// The window's title bar shows on a screen connected now; else the window goes to the middle of the main screen,
+        /// and tempo.log says so. `afterChange`: right after the screens changed, or as the window shows again (the strict
+        /// rule, shown or hidden); else the look every two seconds, for the window that shows (ScreenPlace.Stranded).
+        /// </summary>
+        private void KeepOnScreen(ScreenInfo[] screens, bool afterChange)
+        {
+            try
+            {
+                if (!IsHandleCreated || WindowState == FormWindowState.Minimized || _sizeMove) return;
+                if (!afterChange && !Visible) return;
+                var was = Bounds;
+                var scale = MonitorScale.At(new Point(was.Left + was.Width / 2, was.Top + 16));
+                if (!ScreenPlace.Stranded(was, (int)Math.Round(32 * scale), screens, afterChange)) return;
+                Bounds = ScreenPlace.MiddleOf(ScreenPlace.MainArea(screens), Size);
+                Tempo.Log("the main window stood on no screen (" + ScreenPlace.Text(was) + (Visible ? "" : ", hidden") + (afterChange ? "" : ", seen by the look every 2 s") + "); it comes to the main screen: " + ScreenPlace.Text(Bounds));
+            }
+            catch (Exception e)
+            {
+                ScreenWatch.Problem("the main window's place", e);
+            }
         }
 
         private void Repaint()
@@ -401,9 +469,10 @@ namespace GameMargins.Uploader
         }
 
         /// <summary>
-        /// The tray icon and its tooltip. While Tempo watches the game the icon carries a green dot; for BadgeMinutes
-        /// after a stored scan the green check and "Uploaded 3 min ago · 240,910 auctions"; then the plain icon and
-        /// "Last upload: 14:23". Called after an upload, when Tempo's state changes, and by the minute clock.
+        /// The tray icon and its tooltip. While Tempo reads the game (whenever it is open, session or not) the icon carries
+        /// a green dot and says "Tempo reads MapleStory"; for BadgeMinutes after a stored scan the green check and
+        /// "Uploaded 3 min ago · 240,910 auctions"; then the plain icon and "Last upload: 14:23". Called after an upload,
+        /// when Tempo's state changes, and by the minute clock.
         /// </summary>
         private void RefreshTray()
         {
@@ -411,7 +480,7 @@ namespace GameMargins.Uploader
             if (_settings.Maple && _tempo.Watching)
             {
                 if (!ReferenceEquals(_tray.Icon, _trayIconDot)) _tray.Icon = _trayIconDot;
-                SetTrayText(Texts.T("Tempo is watching MapleStory"));
+                SetTrayText(Texts.T("Tempo reads MapleStory"));
                 return;
             }
             var last = _settings.Wow ? LastStored() : null;
@@ -451,21 +520,30 @@ namespace GameMargins.Uploader
             }
         }
 
-        /// <summary>How Tempo is doing, in one line, with its dot's tone ("ok", "warn", "bad", ""): the same words on Overview, MapleStory's page and the menu.</summary>
+        /// <summary>
+        /// How Tempo is doing, in one line, with its dot's tone ("ok", "warn", "bad", ""): the same words on Overview,
+        /// MapleStory's page and the menu. Tempo reads whenever the game is open; the farm session is said beside it
+        /// (green while Tempo reads, session or not).
+        /// </summary>
         internal string[] TempoStatus()
         {
             if (!_tempo.SiteAllowed) return new[] { Texts.T("Tempo works with gamemargins.com only."), "warn" };
             if (!_tempo.Linked) return new[] { Texts.T("Tempo is not linked to your account yet"), "warn" };
             if (_tempo.Refused) return new[] { Texts.T("The site did not open Tempo for this account"), "bad" };
             if (_tempo.CantLook) return new[] { Texts.T("Tempo can't look at the game on this Windows"), "bad" };
-            if (!_tempo.Consent) return new[] { Texts.T("Tempo is off: it may not look at the game yet"), "" };
+            // Turned off by the player himself (the owner's pick 3 A of 25 November 2026): said as he did it; never chosen and
+            // "No, not now" keep their words.
+            if (!_tempo.Consent) return new[] { _tempo.TurnedOff ? Texts.T("Tempo is off: you turned it off yourself") : Texts.T("Tempo is off: it may not look at the game yet"), "" };
             if (_tempo.RuntimeMissing) return new[] { Texts.T("Tempo needs Microsoft's WebView2"), "warn" };
             var time = _tempo.SessionTime();
             if (_tempo.SessionState == "reading") return new[] { Texts.T("Tempo is reading · {0}", time), "ok" };
+            if (_tempo.Watching && _tempo.SessionState == "paused") return new[] { Texts.T("Tempo reads MapleStory · session paused · {0}", time), "ok" };
+            if (_tempo.Watching) return new[] { Texts.T("Tempo reads MapleStory · session not started"), "ok" };
             if (_tempo.SessionState == "paused") return new[] { Texts.T("Tempo is paused · {0}", time), "" };
             if (_tempo.Problem != null) return new[] { _tempo.Problem, _tempo.ProblemTone == "negative" ? "bad" : "warn" };
+            // The game is there but not looked at yet (minimised, or Tempo's page still on its way).
             if (_tempo.GameFound == true) return new[] { Texts.T("MapleStory is running · Tempo is not started"), "" };
-            return new[] { Texts.T("Tempo is not started"), "" };
+            return new[] { Texts.T("MapleStory is not running"), "" };
         }
 
         /// <summary>How WoW's side is doing, in one line, with its dot's tone.</summary>
@@ -478,6 +556,31 @@ namespace GameMargins.Uploader
             var last = LastStored();
             if (last == null) return new[] { Texts.T("No uploads yet"), "" };
             return new[] { Texts.T("Uploaded {0}", WhenText(last.At)), "ok" };
+        }
+
+        [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
+
+        /// <summary>
+        /// A right click on the icon by the clock (also among the hidden icons): the menu opens at the pointer, on its
+        /// screen, at that screen's scale (TrayMenu.ShowAt). This program's window (unseen) takes the front first, as
+        /// Windows asks of a menu by the clock, so a click anywhere else closes the menu.
+        /// </summary>
+        private void ShowTrayMenu()
+        {
+            if (_trayMenu == null || _quitting) return;
+            try
+            {
+                var pointer = Cursor.Position;
+                SetForegroundWindow(Handle);
+                var place = TrayMenu.ShowAt(_trayMenu, TrayLines(), pointer);
+                // Said in the log only when the menu did not open on the pointer's screen, which should never be.
+                var screen = Screen.FromPoint(pointer).Bounds;
+                if (!screen.IntersectsWith(_trayMenu.Bounds)) Tempo.Log("the menu by the clock opened at " + _trayMenu.Bounds + " (placed at " + place + "), not on the pointer's screen " + screen + " at " + pointer);
+            }
+            catch (Exception e)
+            {
+                Tempo.Log("the menu by the clock could not open: " + e.GetType().Name + " " + e.Message);
+            }
         }
 
         /// <summary>The menu's lines, made each time it opens (TrayMenu.Make), so the minutes are right.</summary>
@@ -498,7 +601,9 @@ namespace GameMargins.Uploader
                 WowLine = wow ? "WoW: " + LowerFirst(wowStatus[0]) : null,
                 WowTone = wowStatus[1],
                 TempoReady = maple && !shut && _tempo.Linked && _tempo.Consent,
-                Watching = _tempo.SessionState == "reading" || _tempo.Watching,
+                TempoTurnedOff = maple && !shut && _tempo.Linked && _tempo.TurnedOff,
+                Session = _tempo.SessionState,
+                GameThere = _tempo.GameFound == true,
                 WowReady = wow && !string.IsNullOrEmpty(_settings.Token),
                 UpdateTo = !_settings.KeepProgramUpdated && _offered != null ? _offered.Version : null,
             };
@@ -508,12 +613,8 @@ namespace GameMargins.Uploader
                 UploadNow = async delegate { await UploadAll(true); },
                 Quit = Quit,
                 OpenTempo = OpenTempoOrWindow,
-                StopWatching = delegate { _tempo.StopWatching(); },
-                StartWatching = delegate
-                {
-                    var open = _tempo.OpenTempo(true, true);
-                    GC.KeepAlive(open);
-                },
+                StartSession = delegate { _tempo.StartSession(); },
+                PauseSession = delegate { _tempo.PauseSession(); },
                 OpenWindow = ShowWindow,
                 OpenSettings = delegate
                 {
@@ -642,6 +743,8 @@ namespace GameMargins.Uploader
             if (language == Texts.Language) return;
             Texts.Language = language;
             Repaint();
+            // Tempo's page and the float speak the program's language: the page loads again in it.
+            _tempo.LanguageChanged();
         }
 
         /// <summary>The first start's language step: a click switches the program's language at once (the step draws again in it).</summary>
@@ -690,6 +793,7 @@ namespace GameMargins.Uploader
             Texts.Language = Texts.Pick(language);
             Repaint();
             RefreshTray();
+            _tempo.LanguageChanged();
         }
 
         private string SiteHost()
@@ -1199,18 +1303,35 @@ namespace GameMargins.Uploader
 
         /// <summary>
         /// Hands over to the checked new exe once nothing is under way: no upload, no addon install, no folder dialog, no
-        /// Tempo session (Tempo reading, or paused with numbers: the update waits until the session is stopped and kept,
-        /// or reset), and for an update by itself no open window either (a click on "Update now" doesn't wait for that).
-        /// Autostart (while on) and the Start-menu shortcut point at the new exe, it starts with --updated-from naming this
-        /// one, and this copy closes its window and icon. This exe stays where it is as the way back: Program.Main
-        /// stands by for half a minute, and when the new copy does not stay up it points everything back here, marks the
-        /// version as bad and starts this one again (Updater.StandBy).
+        /// running Tempo session (a paused one is kept on the account already; Tempo reading the game without a session
+        /// does not hold it up), and for an update by itself no open window either (a click on "Update now" doesn't wait
+        /// for that). First Tempo's page sends what it read so far (flush, five seconds at most). Autostart (while on) and
+        /// the Start-menu shortcut point at the new exe, it starts with --updated-from naming this one, and this copy
+        /// closes its window and icon. This exe stays where it is as the way back: Program.Main stands by for half a
+        /// minute, and when the new copy does not stay up it points everything back here, marks the version as bad and
+        /// starts this one again (Updater.StandBy).
         /// </summary>
-        private void HandOverWhenIdle()
+        private async void HandOverWhenIdle()
         {
             _handOver.Stop();
+            if (_handOverTo == null || _quitting || _handingOver) return;
+            if (!Updater.MayHandOver(_uploadsRunning, _addon.Busy, _dialogOpen, Visible, _handOverClicked, _tempo.SessionRunning))
+            {
+                _handOver.Start();
+                return;
+            }
+            _handingOver = true;
+            try
+            {
+                await _tempo.Flush();
+            }
+            finally
+            {
+                _handingOver = false;
+            }
             if (_handOverTo == null || _quitting) return;
-            if (!Updater.MayHandOver(_uploadsRunning, _addon.Busy, _dialogOpen, Visible, _handOverClicked, _tempo.SessionLive))
+            // Something began while the page was sending (a session, an upload): the update waits for it after all.
+            if (!Updater.MayHandOver(_uploadsRunning, _addon.Busy, _dialogOpen, Visible, _handOverClicked, _tempo.SessionRunning))
             {
                 _handOver.Start();
                 return;
@@ -1222,7 +1343,12 @@ namespace GameMargins.Uploader
             {
                 Program.HandedOver = started;
                 Program.HandedOverVersion = _handOverRelease.Version;
-                Quit();
+                // The new copy waits for this one to have gone; meanwhile Tempo's page leaves with its token.
+                _quitting = true;
+                if (_tray != null) _tray.Visible = false;
+                _tempo.HideAll();
+                try { await _tempo.Leave(); } catch (Exception) { }
+                Finish();
                 return;
             }
             PointAt(Application.ExecutablePath, _settings.StartWithWindows);
@@ -1365,14 +1491,14 @@ namespace GameMargins.Uploader
             GC.KeepAlive(check);
         }
 
-        /// <summary>"Yes, Tempo may look": the player's yes is kept, and Tempo opens and starts.</summary>
+        /// <summary>"Yes, Tempo may look": the player's yes is kept, and Tempo's window opens. Tempo reads while the game is open; the farm session waits for Start.</summary>
         private void SayYes()
         {
             _askAgain = false;
             _tempo.GiveConsent();
             _page = "maple";
             Repaint();
-            var open = _tempo.OpenTempo(true, false);
+            var open = _tempo.OpenTempo(false, false);
             GC.KeepAlive(open);
         }
 
@@ -1381,6 +1507,8 @@ namespace GameMargins.Uploader
         {
             _askAgain = false;
             _settings.TempoAsked = true;
+            // "No, not now" is its own answer, also after "Turn back on": its words, not "you turned it off yourself".
+            _settings.TempoTurnedOff = false;
             _settings.Save();
             if (_settings.Maple) _page = "maple";
             Repaint();
@@ -1517,7 +1645,8 @@ namespace GameMargins.Uploader
                 lines.Add(new TrayLine { Kind = code == Texts.Language ? "main" : "action", Name = code, Text = LanguageName(code), Do = delegate { PickLanguage(picked); } });
             }
             var menu = new ContextMenuStrip { ShowImageMargin = false, ShowCheckMargin = false, Renderer = new TrayRenderer() };
-            TrayMenu.Fill(menu, lines);
+            // At the window's own scale: it opens under its button.
+            TrayMenu.Fill(menu, lines, _canvas.Zoom);
             menu.Opened += delegate { TrayPaint.RoundCorners(menu.Handle); };
             menu.Closed += delegate { BeginInvoke(new Action(menu.Dispose)); };
             var zoom = _canvas.Zoom;
@@ -1530,8 +1659,14 @@ namespace GameMargins.Uploader
         {
             if (_shots) return;
             _allowVisible = true;
+            // Shown before on a screen that has gone since: in the middle of the main screen now.
+            if (Visible || _shownBefore) KeepOnScreen(ScreenPlace.Now(), true);
+            _shownBefore = true;
+            var minimised = WindowState == FormWindowState.Minimized;
             Show();
             WindowState = FormWindowState.Normal;
+            // Brought up from minimised: its place may be on a screen that went away meanwhile.
+            if (minimised) KeepOnScreen(ScreenPlace.Now(), true);
             if (!Program.TestOpen) Activate();
             _tempo.WindowShown();
             if (_linkPaused)
@@ -1555,7 +1690,28 @@ namespace GameMargins.Uploader
             Hide();
         }
 
-        private void Quit()
+        /// <summary>
+        /// Quit in the menu: everything goes out of sight at once (the icon, the window, Tempo's window and the float), Tempo's
+        /// page sends what it read so far (five seconds at most), then the program ends.
+        /// </summary>
+        private async void Quit()
+        {
+            if (_quitting) return;
+            _quitting = true;
+            if (_tray != null) _tray.Visible = false;
+            try { Hide(); } catch (Exception) { }
+            _tempo.HideAll();
+            try
+            {
+                await _tempo.Flush();
+                await _tempo.Leave();
+            }
+            catch (Exception) { }
+            Finish();
+        }
+
+        /// <summary>The program ends: its icon, Tempo and the watching of WoW's files go, and the window closes.</summary>
+        private void Finish()
         {
             _quitting = true;
             if (_tray != null) _tray.Visible = false;
@@ -1569,9 +1725,11 @@ namespace GameMargins.Uploader
             if (disposing)
             {
                 Look.Changed -= OnLookChanged;
+                if (_screens != null) _screens.Dispose();
+                _screens = null;
                 if (_tray != null)
                 {
-                    var menu = _tray.ContextMenuStrip;
+                    var menu = _trayMenu;
                     _tray.Dispose();
                     if (menu != null) menu.Dispose();
                     if (!ReferenceEquals(_trayIconOk, _trayIcon)) _trayIconOk.Dispose();

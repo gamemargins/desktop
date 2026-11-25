@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.4.2 (2026-11-26)
+
+- **Tempo reads MapleStory whenever GameMargins Desktop runs and the game is open**, not only after Start, and also
+  while the Tempo window is closed: the shop prices it sees reach the Market, and the kills and drops it counts go to
+  the site's Drop database (without your name). Nothing opens for it: the icon by the clock gets its green dot and
+  says "Tempo reads MapleStory". The float comes only when you had it on the last time; for a new player it stays off
+  until you turn it on (Tempo › Float). To stop Tempo, turn **Tempo may look at the MapleStory window** off on
+  Settings, or quit the program. On Windows 10 the game's window has Windows'
+  own thin yellow border the whole time GameMargins Desktop runs with MapleStory open; Windows 11 draws nothing.
+- **Start, Pause, Continue and Reset are for your own farm session** (your numbers an hour, the stopwatch, your kept
+  sessions). The menu by the clock says "Tempo reads MapleStory · session not started" (or "· session paused · 12
+  min") and has **Start session**, **Pause session** or **Continue session**, grey while the game is not running.
+  "Start Tempo with MapleStory" is gone: there is nothing to start any more.
+- **The float shows your session's totals with their words**: "21,083 EXP", "+3,640 profit" (green, a loss red),
+  "13,920 mesos" and "2 h 46 min", each with its rate small under it ("48,212 / hour", "to next level"), in all three
+  sizes. The small float is a little wider for it; a long number gets a little smaller, never cut off.
+- **Your own shop**: the first time Tempo sees your shop open, the float asks **Put your shop on the Market?** with
+  **Always** and **Not now**. After **Always** every shop you open goes on the Market by itself, with your character's
+  name hidden, until you turn **Put my shop online by itself** off in Tempo's Settings; **Not now** keeps that one
+  shop off. While your shop is online the float says so, and the bar shows it as a tile.
+- The Tempo window's cross only hides it while the game is open. **Quit** and an update first let Tempo send what it
+  read so far (a few seconds at most). The program now also updates itself while the game is open, as long as no
+  farm session runs.
+- **The float stays with MapleStory**: it goes when you close the game and is back when you start it again, at its
+  own place against or inside the game's window (the side it sticks to and how far), also after GameMargins Desktop
+  started again. The first time it stands inside the game at the right, under the quest helper. A click on the float
+  (a button, or anywhere on it) brings MapleStory to the front when another window was over it, and the float still
+  never takes the keyboard.
+- **Nothing opens on a screen that is gone**: a second screen switched off or unplugged, or the screens arranged
+  anew. The Tempo window, the main window and the float come where they show (the float at the game), at the start
+  and within seconds while the program runs. A window you minimised stays minimised and comes to your main screen
+  when you bring it up. `tempo.log` names the screens at each change and every window the program moved.
+- The menu by the clock opens at the pointer, also from the hidden icons and on a screen with another scale.
+- **Tempo's window and the float speak the program's language**, and change with it (once no session would be lost).
+  **Tempo may look at the MapleStory window** can now be turned off in Tempo's own Settings too.
+- A long map's name in the float's shop lines goes on to a second line, never cut off; in the bar your shop is a
+  shorter tile on two lines.
+- **The map in the float's head is never cut off**: it shows the map's own name ("Construction Site North of Kerning
+  City", without "Victoria Road :"), beside the clock when it fits and else on a line of its own under it; in the bar
+  under the clock, as wide as it needs. Before the clock runs, the name stands in its place the same way.
+- **When you turned Tempo off yourself**, Overview, the MapleStory Classic page and the menu by the clock say **Tempo is
+  off: you turned it off yourself**, with a gold **Turn back on** (the menu: **Turn Tempo back on**), which asks the
+  question again; the MapleStory page says "no · you turned it off". "No, not now" and a question never answered keep
+  their words.
+- **A shop that waits for your channel**: Tempo reads the channel from the game's CHANGE CHANNEL window. Started while
+  you were already in the game, it does not know it until you open that window once, and until then a shop can't go to
+  the Market. The float now says so in its shop block with an orange dot: **Spotted, not on the Market** for a shop you
+  open as a visitor, and **Your shop waits for your channel** for your own, each with how to fix it (Menu › Change
+  Channel); the small float and the bar say it short ("Spotted · channel unknown", "Shop waits for channel"). It goes
+  as soon as Tempo knows the channel.
+
 ## 0.4.1 (2026-11-25)
 
 - **The bar**, a third size of the float: one strip as tall as MapleStory's dashboard, the first time at the top of the

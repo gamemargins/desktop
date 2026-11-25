@@ -14,9 +14,15 @@
 // The page and the program talk in small JSON messages (protocol 1):
 //   page → program   { type: "ready" } · { type: "capture", action: "start" | "stop" } · { type: "frame" } ·
 //                    { type: "float", action: "open" | "close" | "update", values } ·
-//                    { type: "session", state, numbers } · { type: "open", url }
-//   program → page   { type: "state", … } · { type: "capture", ok, … } · { type: "frame", width, height, stride, at } ·
-//                    { type: "captureEnded", reason } · { type: "command", action: "start" | "stop" | "reset" | "float" }
+//                    { type: "session", state, numbers, seconds, reading } · { type: "setting", name, value } (name:
+//                    "floatLocked", "shopAuto", "consent" (false: Tempo may no longer look), "startWithGame" of old) ·
+//                    { type: "open", url } · { type: "flushed" }
+//   program → page   { type: "state", …, always, totals, shopAuto, consent } · { type: "capture", ok, … } ·
+//                    { type: "frame", width, height, stride, at } · { type: "captureEnded", reason } ·
+//                    { type: "command", action: "start" | "stop" | "reset" | "float" | "read" | "flush" |
+//                      "shop-always" | "shop-not-now" }
+// The window may run without being shown: Tempo reads while the game is open whether or not the player opened it. The
+// page is the site's in the program's language (/nl/maplestory-classic/tempo-desktop; English without one).
 
 using System;
 using System.Collections.Generic;
@@ -81,7 +87,8 @@ namespace GameMargins.Uploader
 
         private readonly Tempo _tempo;
         private readonly Settings _settings;
-        private readonly Uri _page;
+        /// <summary>The page this window shows: the site's Tempo page, in the program's language (LoadAgain changes it).</summary>
+        private Uri _page;
         private readonly string _origin;
         private readonly bool _local;
         private readonly WebView2 _web = new WebView2();
@@ -96,6 +103,10 @@ namespace GameMargins.Uploader
 
         /// <summary>The page said it is there and listening.</summary>
         public bool Ready;
+        /// <summary>The address of the page this window shows.</summary>
+        public Uri Page { get { return _page; } }
+        /// <summary>When this window was made (a page loaded unseen that never says it is there is tried again later).</summary>
+        public readonly DateTime MadeAt = DateTime.UtcNow;
         /// <summary>The watched window's place on the screen, or empty.</summary>
         public Rectangle WatchedBounds
         {
@@ -141,26 +152,129 @@ namespace GameMargins.Uploader
             FormClosing += OnClosing;
         }
 
-        /// <summary>Where the window stood last time when that is still on a screen, else 1100 × 720 in the middle of the main screen.</summary>
+        /// <summary>
+        /// Where the window stood last time when its title bar still shows on a screen connected now (a second screen may
+        /// be switched off or unplugged since), else 1100 × 720 in the middle of the main screen, at that screen's own scale.
+        /// </summary>
         private Rectangle StartBounds()
         {
+            var screens = ScreenPlace.Now();
             var parts = (_settings.TempoBounds ?? "").Split(',');
             int x, y, w, h;
             if (parts.Length == 4 && int.TryParse(parts[0], out x) && int.TryParse(parts[1], out y) && int.TryParse(parts[2], out w) && int.TryParse(parts[3], out h) && w >= 480 && h >= 360)
             {
                 var kept = new Rectangle(x, y, w, h);
-                foreach (var screen in Screen.AllScreens)
-                {
-                    var seen = Rectangle.Intersect(screen.WorkingArea, kept);
-                    if (seen.Width >= 200 && seen.Height >= 120) return kept;
-                }
+                if (!ScreenPlace.Stranded(kept, TitleHeight(kept), screens, true)) return kept;
+                Tempo.Log("the Tempo window's place is on no screen connected now; it opens on the main screen");
             }
-            var area = Screen.PrimaryScreen.WorkingArea;
-            var scale = 1f;
-            try { using (var g = CreateGraphics()) scale = g.DpiX / 96f; } catch (Exception) { }
-            var width = Math.Min(area.Width, (int)(1116 * scale));
-            var height = Math.Min(area.Height, (int)(759 * scale));
-            return new Rectangle(area.Left + (area.Width - width) / 2, area.Top + (area.Height - height) / 2, width, height);
+            return MainScreenBounds(screens);
+        }
+
+        /// <summary>1100 × 720 (with its frame) in the middle of the main screen of `screens`, at the main screen's scale.</summary>
+        internal static Rectangle MainScreenBounds(ScreenInfo[] screens)
+        {
+            var main = ScreenPlace.MainScreen(screens);
+            var area = main != null ? main.Work : Screen.PrimaryScreen.WorkingArea;
+            var scale = main != null ? main.Scale : MonitorScale.At(new Point(area.Left + area.Width / 2, area.Top + area.Height / 2));
+            return ScreenPlace.MiddleOf(area, new Size((int)(1116 * scale), (int)(759 * scale)));
+        }
+
+        /// <summary>Its title bar's height at `r`: some 32 at the scale of the screen there (the nearest one when it is on none).</summary>
+        private static int TitleHeight(Rectangle r)
+        {
+            return (int)Math.Round(32 * MonitorScale.At(new Point(r.Left + r.Width / 2, r.Top + 16)));
+        }
+
+        /// <summary>The player moves or sizes the window (between WM_ENTERSIZEMOVE and WM_EXITSIZEMOVE).</summary>
+        private bool _sizeMove;
+        /// <summary>The minimised window's place on no screen, as tempo.log last said it (once, not every two seconds).</summary>
+        private string _minimisedSaid;
+
+        /// <summary>As the window shows again (ShowFront, brought up from the taskbar): it comes where it shows.</summary>
+        public void KeepOnScreen()
+        {
+            KeepOnScreen(ScreenPlace.Now(), true);
+        }
+
+        /// <summary>
+        /// A screen went away or the screens were arranged anew (`afterChange`, also as the window shows again; shown or
+        /// hidden, the strict rule), or the look every two seconds (only while it shows, only when its title bar is on no
+        /// screen at all; ScreenPlace.Stranded): a window that stands where no screen is comes to the middle of the main
+        /// screen, as at the start, and tempo.log says so. A minimised window stays minimised: it comes to the main screen
+        /// as it is brought up (OnResize).
+        /// </summary>
+        public void KeepOnScreen(ScreenInfo[] screens, bool afterChange)
+        {
+            try
+            {
+                if (IsDisposed || _sizeMove) return;
+                if (WindowState == FormWindowState.Minimized)
+                {
+                    NoteMinimised(screens);
+                    return;
+                }
+                // Windows puts a maximised window on a screen that is there; nothing to do.
+                if (WindowState == FormWindowState.Maximized) return;
+                if (!afterChange && !Visible) return;
+                var was = Bounds;
+                if (!ScreenPlace.Stranded(was, TitleHeight(was), screens, afterChange)) return;
+                Bounds = MainScreenBounds(screens);
+                Tempo.Log("a screen went away; the Tempo window comes to the main screen: it stood at " + ScreenPlace.Text(was) + (Visible ? "" : " (hidden)") + ", on no screen" + (afterChange ? "" : " (seen by the look every 2 s)") + "; now at " + ScreenPlace.Text(Bounds));
+            }
+            catch (Exception e)
+            {
+                ScreenWatch.Problem("the Tempo window's place", e);
+            }
+        }
+
+        /// <summary>Minimised, with its place on no screen now: said once in tempo.log; it comes to the main screen as it is brought up.</summary>
+        private void NoteMinimised(ScreenInfo[] screens)
+        {
+            var place = NormalPlace();
+            if (place.IsEmpty || !ScreenPlace.Stranded(place, TitleHeight(place), screens, true))
+            {
+                _minimisedSaid = null;
+                return;
+            }
+            var said = ScreenPlace.Text(place) + " " + ScreenPlace.Describe(screens);
+            if (said == _minimisedSaid) return;
+            _minimisedSaid = said;
+            Tempo.Log("the Tempo window is minimised and its place (" + ScreenPlace.Text(place) + ") is on no screen now: it comes to the main screen as it is brought up");
+        }
+
+        [StructLayout(LayoutKind.Sequential)] private struct NativePoint { public int X, Y; }
+        [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int Left, Top, Right, Bottom; }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct WindowPlacement
+        {
+            public int Length;
+            public int Flags;
+            public int ShowCmd;
+            public NativePoint MinPosition;
+            public NativePoint MaxPosition;
+            public NativeRect NormalPosition;
+        }
+        [DllImport("user32.dll")] private static extern bool GetWindowPlacement(IntPtr window, ref WindowPlacement placement);
+
+        /// <summary>Where the window stands when it is not minimised, as Windows keeps it (with the taskbar at the bottom, in the screen's own coordinates); empty when unknown.</summary>
+        private Rectangle NormalPlace()
+        {
+            if (!IsHandleCreated) return Rectangle.Empty;
+            var p = new WindowPlacement();
+            p.Length = Marshal.SizeOf(typeof(WindowPlacement));
+            if (!GetWindowPlacement(Handle, ref p)) return Rectangle.Empty;
+            return Rectangle.FromLTRB(p.NormalPosition.Left, p.NormalPosition.Top, p.NormalPosition.Right, p.NormalPosition.Bottom);
+        }
+
+        /// <summary>Where the window stands, for tempo.log: "shown at 3940,439,1116,805", "hidden at …", "minimised (its place …)".</summary>
+        public string StateText()
+        {
+            if (WindowState == FormWindowState.Minimized)
+            {
+                var place = NormalPlace();
+                return "minimised" + (place.IsEmpty ? "" : " (its place " + ScreenPlace.Text(place) + ")");
+            }
+            return (Visible ? "shown" : "hidden") + (WindowState == FormWindowState.Maximized ? " maximised" : "") + " at " + ScreenPlace.Text(Bounds);
         }
 
         protected override void OnHandleCreated(EventArgs e)
@@ -197,12 +311,27 @@ namespace GameMargins.Uploader
         protected override void WndProc(ref Message m)
         {
             if (Look.IsColourChange(ref m)) Look.Refresh();
+            // WM_ENTERSIZEMOVE and WM_EXITSIZEMOVE: the player moves the window; no check takes it from under the pointer.
+            if (m.Msg == 0x0231) _sizeMove = true;
+            else if (m.Msg == 0x0232) _sizeMove = false;
             base.WndProc(ref m);
         }
 
-        /// <summary>Shows the window; `quiet`: minimised and without taking the keyboard (Tempo started with the game).</summary>
-        public void Open(bool quiet)
+        /// <summary>
+        /// Shows the window in front; or `Quiet`, minimised and without taking the keyboard (a test start); or `Unseen`, not
+        /// at all: the window and its page are made and run, and nothing shows until ShowFront (Tempo reads while the game
+        /// is open, whether or not the player opened its window).
+        /// </summary>
+        public void Open(Tempo.Opening how)
         {
+            if (how == Tempo.Opening.Unseen)
+            {
+                // The handles only: the page needs a window to live in, never one on the screen.
+                GC.KeepAlive(Handle);
+                GC.KeepAlive(_web.Handle);
+                return;
+            }
+            var quiet = how == Tempo.Opening.Quiet;
             _quiet = quiet;
             if (quiet)
             {
@@ -216,20 +345,46 @@ namespace GameMargins.Uploader
             _quiet = false;
         }
 
+        /// <summary>Out of sight at once, whatever it shows (Quit: the page runs on until it is flushed and closed).</summary>
+        public void HideNow()
+        {
+            try
+            {
+                if (IsHandleCreated) ShowWindow(Handle, 0);
+                Hide();
+            }
+            catch (Exception) { }
+        }
+
         /// <summary>The window was shown minimised by Windows directly, and the form has not been told yet that it shows.</summary>
         private bool _shownByWindows;
 
-        /// <summary>The player brought the quietly opened window up from the taskbar: from here on it is a shown form like any other.</summary>
+        /// <summary>The window was minimised the last time it changed size.</summary>
+        private bool _wasMinimised;
+
+        /// <summary>
+        /// Brought up from the taskbar: where a screen went away meanwhile, it comes to the main screen (once Windows has
+        /// put it up). The quietly opened window is from here on a shown form like any other.
+        /// </summary>
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
-            if (!_shownByWindows || WindowState == FormWindowState.Minimized || _closing) return;
+            var minimised = WindowState == FormWindowState.Minimized;
+            var broughtUp = _wasMinimised && !minimised;
+            _wasMinimised = minimised;
+            if (broughtUp && !_closing && IsHandleCreated)
+            {
+                try { BeginInvoke(new Action(KeepOnScreen)); } catch (Exception) { }
+            }
+            if (!_shownByWindows || minimised || _closing) return;
             _shownByWindows = false;
             Show();
         }
 
         public void ShowFront()
         {
+            // Waited unseen while a screen went away: it comes where it shows.
+            KeepOnScreen();
             if (_shownByWindows)
             {
                 _shownByWindows = false;
@@ -359,8 +514,37 @@ namespace GameMargins.Uploader
         private void OnNavigationStarting(object sender, CoreWebView2NavigationStartingEventArgs e)
         {
             if (IsPage(e.Uri)) return;
+            // LeavePage() takes the page to an empty one before the window closes.
+            if (_leaving && e.Uri == Blank) return;
             e.Cancel = true;
             if (e.IsUserInitiated) OpenOutside(e.Uri);
+        }
+
+        private const string Blank = "about:blank";
+        /// <summary>How long LeavePage() gives the page's last requests to pass this window, so they carry the token.</summary>
+        private const int LeaveMs = 400;
+        private bool _leaving;
+
+        /// <summary>
+        /// Lets the page go before the window closes (Quit, an update, Tempo turned off): the window goes to an empty page
+        /// and waits a moment. What the page sends as it goes (pagehide: a beacon, a keepalive request) then still passes
+        /// this window and gets the token; with the window closed at once it would leave without it.
+        /// </summary>
+        public async Task LeavePage()
+        {
+            if (_core == null || _leaving || _closing) return;
+            _leaving = true;
+            Ready = false;
+            StopCapture();
+            try
+            {
+                _core.Navigate(Blank);
+            }
+            catch (Exception)
+            {
+                return;
+            }
+            await Task.Delay(LeaveMs);
         }
 
         private void OnNewWindow(object sender, CoreWebView2NewWindowRequestedEventArgs e)
@@ -398,8 +582,12 @@ namespace GameMargins.Uploader
         {
             try
             {
-                // Unlinked on the site: the routes answer 401 from then on.
-                if (e.Response != null && e.Response.StatusCode == 401 && IsTempoRoute(e.Request.Uri) && !string.IsNullOrEmpty(_settings.TempoToken)) _tempo.OnUnauthorized();
+                // Unlinked on the site: the routes answer 401 from then on. Only an answer to a request that carried the
+                // token says so: one that went without it (as the window closed) says nothing about the link.
+                if (e.Response == null || e.Response.StatusCode != 401 || !IsTempoRoute(e.Request.Uri) || string.IsNullOrEmpty(_settings.TempoToken)) return;
+                var carried = e.Request.Headers.Contains("Authorization");
+                Tempo.Log("a Tempo route answered 401 " + (carried ? "to the token" : "to a request without the token") + (_leaving || _closing ? ", as the window closed" : ""));
+                if (carried && !_leaving && !_closing) _tempo.OnUnauthorized();
             }
             catch (Exception) { }
         }
@@ -442,6 +630,8 @@ namespace GameMargins.Uploader
                 switch (Json.Str(m, "type") ?? "")
                 {
                     case "ready":
+                        // A page that loaded (again) has no block of memory for frames yet: the next capture hands it a new one.
+                        ForgetBuffer();
                         Ready = true;
                         _tempo.OnReady();
                         break;
@@ -460,13 +650,16 @@ namespace GameMargins.Uploader
                         _tempo.OnFloat(Json.Str(m, "action"), Json.Object(m, "values"));
                         break;
                     case "session":
-                        _tempo.OnSession(Json.Str(m, "state"), Json.Bool(m, "numbers"), Json.Number(m, "seconds"));
+                        _tempo.OnSession(Json.Str(m, "state"), Json.Bool(m, "numbers"), Json.Number(m, "seconds"), Json.Bool(m, "reading"));
                         break;
                     case "setting":
                         _tempo.OnSetting(Json.Str(m, "name"), Json.Bool(m, "value"));
                         break;
                     case "open":
                         OpenOutside(Json.Str(m, "url"));
+                        break;
+                    case "flushed":
+                        _tempo.OnFlushed();
                         break;
                 }
             }
@@ -535,6 +728,36 @@ namespace GameMargins.Uploader
             _watchdog.Start();
             Post(new Dictionary<string, object> { { "type", "capture" }, { "ok", true }, { "width", _capture.Width }, { "height", _capture.Height } });
             _tempo.OnWatching();
+        }
+
+        /// <summary>
+        /// The page loads again at `page` (the program's language changed): the looking stops (the new page asks for it
+        /// again), and the page is the new one from here on. The caller has had the old page send what it read (flush).
+        /// </summary>
+        public void LoadAgain(Uri page)
+        {
+            if (_core == null || _closing || _leaving) return;
+            Ready = false;
+            StopCapture();
+            _page = page;
+            try { _core.Navigate(page.AbsoluteUri); } catch (Exception e) { Tempo.Log("the Tempo page could not load again: " + e.GetType().Name + " " + e.Message); }
+        }
+
+        /// <summary>The block of memory for frames goes (a little later: a page may still read it); the next capture makes and hands over a new one.</summary>
+        private void ForgetBuffer()
+        {
+            var old = _shared;
+            _shared = null;
+            _sharedSize = 0;
+            if (old == null) return;
+            var later = new Timer { Interval = 5000 };
+            later.Tick += delegate
+            {
+                later.Stop();
+                later.Dispose();
+                try { old.Dispose(); } catch (Exception) { }
+            };
+            later.Start();
         }
 
         /// <summary>One block of memory the page can read, big enough for a frame; a bigger frame gets a new block.</summary>
@@ -623,6 +846,12 @@ namespace GameMargins.Uploader
             Post(message);
         }
 
+        /// <summary>Stops looking now and tells the page, as when the game's window goes away ("Tempo may look" turned off, MapleStory turned off).</summary>
+        public void EndWatching()
+        {
+            if (_capture != null) EndCapture("closed", null);
+        }
+
         public void StopCapture()
         {
             _watchdog.Stop();
@@ -641,8 +870,9 @@ namespace GameMargins.Uploader
                 _settings.TempoBounds = Left + "," + Top + "," + Width + "," + Height;
                 _settings.Save();
             }
-            // While a session runs the cross only hides the window: Tempo goes on, and the tray icon and the float show it.
-            if (!_closing && e.CloseReason == CloseReason.UserClosing && _tempo.SessionLive)
+            // While the game is open (or a session would be lost) the cross only hides the window: Tempo reads on, and the
+            // tray icon and the float show it. Quit, or "Tempo may look at the MapleStory window" off, closes it.
+            if (!_closing && e.CloseReason == CloseReason.UserClosing && _tempo.KeepsWindow)
             {
                 e.Cancel = true;
                 Hide();

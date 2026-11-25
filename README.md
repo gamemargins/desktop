@@ -30,18 +30,27 @@ autostart.
   newer one is downloaded from this repository's releases, checked, and takes over while the window is closed
   (**Keep the program up to date** on Settings, on by default). No notification: Overview says "Updated to x" for a
   few days, with **What's new**, a link to that version's entry on gamemargins.com/whats-new. An upload, an addon
-  install or a Tempo session under way finishes first. Turn the switch off and nothing is downloaded by itself: a
+  install or a running Tempo session finishes first (a paused one is kept on your account already), and Tempo first
+  sends what it read so far. Turn the switch off and nothing is downloaded by itself: a
   newer version waits as a row on Settings, "Version x.y.z is ready" with **Update now**, and as **Update to x.y.z**,
   the first thing to do in the menu; one notification says so.
 - **A way back.** The version an update replaced stays on your PC. When a new version does not stay up (it ends with
   an error within 30 seconds of taking over), the one before starts again by itself, says so in a notification
   ("Could not update to x.y.z"), and that version is not tried again.
 - **Tempo for MapleStory Classic.** A window titled "Tempo" shows gamemargins.com's Tempo
-  page; the program hands that page the picture of the MapleStory window, so no browser has to share a window. A small
-  float stays on top of the game with your session's time, your numbers an hour and your monsters with their drops,
-  in three sizes: Small, Large, and a bar as tall as the game's dashboard, with one button that goes round them; a
-  click on it never takes the keyboard away from the game. **Start Tempo with MapleStory**, **Show
-  the float** and **Lock the float (click through)** are in the Tempo window's own Settings.
+  page; the program hands that page the picture of the MapleStory window, so no browser has to share a window. Tempo
+  reads whenever the program runs and MapleStory is open, also while its window is closed: the shop prices it sees,
+  and the kills and drops for the site's Drop database. **Start**, **Pause**, **Continue** and **Reset** are for your
+  own farm session (your numbers an hour, the stopwatch, your kept sessions). A small float stays on top of the game
+  with your session's time, its totals with their words and the rates under them ("21,083 EXP", "48,212 / hour"),
+  and your monsters with their drops, in three sizes: Small, Large, and a bar as tall as the game's dashboard, with
+  one button that goes round them; a click on it brings the game to the front and never takes the keyboard away from
+  it. It goes when you close the game and is back with it, at its own place against or inside the game's window (the
+  side it sticks to and how far), also after the program started again; the first time inside the game at the right,
+  under the quest helper. Tempo's window and the float speak the program's language. The first time Tempo
+  sees your own shop open, the float asks **Put your shop on the Market?** with **Always** and **Not now**. **Show the
+  float** (off until you turn it on), **Lock the float (click through)** and **Put my shop online by itself** are in the Tempo window's own
+  Settings.
 - **One window, a page per thing.** A list at the left: Overview, a page per game you use, and Settings at the foot
   with the version. Each page has one main button. Overview has a card per game with one line that says how it is
   doing. WoW: Forever's page has **Upload now**, your WoW accounts, the folder, the addon and the last uploads.
@@ -51,12 +60,12 @@ autostart.
   may look at the MapleStory window, Appearance (Follow Windows, Light or Dark), Language, Games (Add or remove a
   game) and Account (Unlink). A setting of a game you don't use is not shown.
 - **A short menu by the clock.** The program sits in the notification area with the GameMargins mark: a left click
-  opens the window, a right click the menu. The menu first says how things are ("Tempo is reading · 26 min", "WoW:
-  uploaded 3 min ago"), then what you can do: Open Tempo, Stop watching or Start watching, Upload now, Open
-  GameMargins Desktop, Settings, Quit. It holds no settings.
+  opens the window, a right click the menu. The menu first says how things are ("Tempo reads MapleStory · session not
+  started", "Tempo is reading · 26 min", "WoW: uploaded 3 min ago"), then what you can do: Open Tempo, Start session,
+  Pause session or Continue session, Upload now, Open GameMargins Desktop, Settings, Quit. It holds no settings.
 - **A green check, not a notification.** For ten minutes after an upload that stored a scan the icon carries a small
-  green check, and its tooltip says when the last upload was. While Tempo watches the game the icon carries a green
-  dot and the tooltip says "Tempo is watching MapleStory".
+  green check, and its tooltip says when the last upload was. While Tempo reads the game (the whole time MapleStory
+  is open, session or not) the icon carries a green dot and the tooltip says "Tempo reads MapleStory".
 - **Notifications only when you have to do something**: an upload the site refused, the program unlinked on the
   site, an update that failed its check or could not be installed, and, with **Keep the program up to date** off, a
   version that waits. They are Windows notifications, which stay in the notification center, also while Windows' Do
@@ -110,12 +119,14 @@ The whole of what the program looks at is in [`src/Capture.cs`](src/Capture.cs);
 Windows.Graphics.Capture (the way recording and streaming programs look at a window). The mouse pointer is left out
 of the picture on Windows 11 and on Windows 10 from version 2004; an older Windows 10 can't leave it out, so there
 the pointer is in the picture while it is over the game. Only after you said yes to **May Tempo look at your
-MapleStory window?** in the program; **Tempo may look at the MapleStory window** on Settings takes that yes back.
+MapleStory window?** in the program. From then on it looks **whenever GameMargins Desktop runs and MapleStory is
+open**, not only after you press Start, and whether or not the Tempo window is open: Start, Pause, Continue and Reset
+decide only your own farm session. To stop it looking, turn **Tempo may look at the MapleStory window** off on
+Settings, or quit the program.
 
 **Finds the game's window** by asking Windows for the open windows' titles, classes, sizes and whether they are shown
-or minimised; the game's is the one titled exactly "MapleStory". The program looks for it only after that yes, and
-only while **Start Tempo with MapleStory** is on or the Tempo window is open, every few seconds. None of this asks
-anything of the game.
+or minimised; the game's is the one titled exactly "MapleStory". The program looks for it only after that yes, every
+few seconds while it runs. None of this asks anything of the game.
 
 **Never**: the game's process, memory, modules, files or network; never a message, a key or a click to the game;
 no hooks; nothing drawn in or over the game.
@@ -124,24 +135,28 @@ no hooks; nothing drawn in or over the game.
 computer, one frame at a time, to the Tempo page in the program's own window, and the page reads the numbers there.
 Nothing of a frame is written to disk or sent anywhere.
 
-**You always see when it watches**: a green dot on the icon by the clock, "Tempo is watching MapleStory" as its
-tooltip, and **Stop watching** in its menu.
+**You always see when it watches**: a green dot on the icon by the clock the whole time, "Tempo reads MapleStory" as
+its tooltip and as the menu's first line.
 
 **The Tempo window** is Microsoft's WebView2 (Microsoft Edge's engine). It loads the Tempo page from gamemargins.com,
-as a browser would, and only that page: any other link opens in your own browser. The page can't share a screen or a
-window by itself, nor use the camera, the microphone or your location.
+as a browser would, and only that page: any other link opens in your own browser. While MapleStory is open the page
+runs whether or not you opened the window (closing it only hides it); nothing shows until you open it. The page can't
+share a screen or a window by itself, nor use the camera, the microphone or your location.
 
 **Sends**, to gamemargins.com only, and only after you linked the program for Tempo:
 
 - **A start check**: whether Tempo's token is still good and whether the account may use Tempo; a yes comes with the
   address of the Tempo page. It is asked right after Tempo's link, at every start of the program, once a day, each
-  time the Tempo window opens, and when you press **Check again**.
-- **What the Tempo page sends**, the same as Tempo in a browser: when you stop a session, its summary (times, the
-  map, EXP, mesos, kills and drops per monster, quests turned in, what you crafted, and the kills and drops counted
-  for the site's Drop database); the shop prices it read while a player shop was open in the game; and, only after
-  you click **Put my shop online**, what your own shop offers. Numbers and the game's ids: never a picture, never the
-  chat, never a name, except your character's name beside your shop when you turn that on. It also asks the site for
-  prices and for your kept sessions.
+  time the Tempo window opens (also unseen, when MapleStory is there), and when you press **Check again**.
+- **What the Tempo page sends**: the shop prices it reads while a player shop is open in the game; while you play,
+  with or without a session, about every five minutes and once more when the program closes or updates itself, the
+  kills and drops it counted for the site's Drop database (without your name); when you pause or reset your farm
+  session, and every five minutes while it runs, the session's summary (times, the map, EXP, mesos, kills and drops
+  per monster, quests turned in, what you crafted); and, only after you answer **Always** to **Put your shop on the
+  Market?** (or click **Put my shop online**), what your own shop offers, until you turn **Put my shop online by
+  itself** off in Tempo's Settings. Numbers and the game's ids: never a picture, never the chat, never a name, except
+  your character's name beside your shop when you turn that on. It also asks the site for prices and for your kept
+  sessions.
 
 The [privacy policy](https://gamemargins.com/privacy) says what the site keeps of these and for how long, under
 "Tempo in GameMargins Desktop" and the items around it.
@@ -196,7 +211,7 @@ It runs as a normal user program and never asks for administrator rights.
 - `%LOCALAPPDATA%\GameMargins\Uploader\`:
   - `settings.json`: the site, your WoW folder, the language, the switches of Settings, which games you use, both
     protected tokens, whether you said yes to Tempo looking at the game's window, Tempo's own switches, where the
-    Tempo window, the float and the bar stood and the float's size, the version the program last updated itself to and when,
+    Tempo window, the float and the bar stood (on the screen, and against the game's window) and the float's size, the version the program last updated itself to and when,
     a version that did not stay up, the newest version a "Version x.y.z is ready" notification announced,
     fingerprints of the files already uploaded and the last eight uploads for the window.
   - `GameMarginsDesktop-<version>.exe`: the versions the program installed itself. After an update the running one
@@ -207,7 +222,9 @@ It runs as a normal user program and never asks for administrator rights.
   - `webview2\<SDK version>\WebView2Loader.dll`: Microsoft's loader for WebView2, written from the exe (and checked
     against its SHA-256) the first time the Tempo window opens.
   - `tempo.log`: a line when something of Tempo went wrong, and at each start of watching the watched window's class
-    and size. Never anything of a picture; it starts over when it passes 256 KB.
+    and size; at each start and whenever the screens change, the screens as Windows names them (`\\.\DISPLAY1`, their
+    places, work areas and scales) and where the program's windows stand, and a line for every window the program
+    moves back onto a screen. Never anything of a picture; it starts over when it passes 256 KB.
   - `logo.png`: the picture the notifications show.
 - **Start with Windows**: the value `GameMarginsUploader` (the name it had before 0.2.5, kept so autostart stays one
   entry) under `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run`, only while **Start with Windows**
@@ -236,8 +253,9 @@ exe, the Start-menu shortcut and `%LOCALAPPDATA%\GameMargins\Uploader`.
 - **Tempo needs Windows 10 version 1903 or later**, or Windows 11: that is where Windows began to let a program
   look at one window. On an older Windows 10, MapleStory Classic's page says "Tempo can't look at the game on this
   Windows", no question is asked and nothing of Tempo opens; WoW: Forever works as usual.
-- **Windows 10 draws its own thin yellow border around a watched window** while Tempo looks, on every version of
-  Windows 10; a program can't remove it there. On Windows 11 nothing is drawn around the game.
+- **Windows 10 draws its own thin yellow border around a watched window**: on Windows 10 the game's window has it the
+  whole time GameMargins Desktop runs with MapleStory open, on every version of Windows 10; a program can't remove it
+  there. On Windows 11 nothing is drawn around the game.
 - **The mouse pointer** is left out of the picture Tempo reads on Windows 11 and on Windows 10 from version 2004. On
   Windows 10 versions 1903 and 1909 it can't be left out.
 - **The Tempo window needs Microsoft's WebView2**, which is part of Windows 11 and of an updated Windows 10. When it

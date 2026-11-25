@@ -1,10 +1,14 @@
 // Tempo's side of the program, for MapleStory Classic: linking it to the account with a code (its own token, apart from
-// the WoW one), the Tempo window (TempoWindow.cs) and the float (FloatWindow.cs), "Start Tempo with MapleStory", and
-// what the main window's pages and the menu by the clock show of it. The page in the Tempo window owns the session (start, stop,
-// reset, the numbers); this class passes the buttons' presses on to it and shows what the page says.
+// the WoW one), the Tempo window (TempoWindow.cs) and the float (FloatWindow.cs), and what the main window's pages and
+// the menu by the clock show of it. The page in the Tempo window reads the game and owns the farm session (Start, Pause,
+// Continue, Reset, the numbers); this class passes the buttons' presses on to it and shows what the page says.
 //
-// The program looks for the game's window by itself only while "Start Tempo with MapleStory" is on (a switch in Tempo's own Settings) or the Tempo
-// window is open, every few seconds, by the window's title (Capture.cs). The switch is off until the player sets it.
+// Tempo reads whenever the program runs with MapleStory open, once it is linked and the player said Tempo may look:
+// every few seconds the program looks for the game's window by its title (Capture.cs), and while it is there the Tempo
+// page runs in a window that is not shown until the player opens it ("Open Tempo"), and is asked to read. The farm
+// session is apart from that and the player's alone. Looking stops when the game closes, when "Tempo may look at the
+// MapleStory window" is turned off on Settings, and at Quit. Before the program closes or updates itself the page is
+// asked to send what it read so far ("flush"), and given five seconds at most.
 //
 // The site hands out the address of Tempo's page at every opening (Api.TempoStart). Should it refuse an account that
 // is linked (403; Tempo is for every account, so this is not expected), that is remembered until the program closes
@@ -27,6 +31,12 @@ namespace GameMargins.Uploader
         /// <summary>The Tempo page's path on the site; the site's start route names the whole address.</summary>
         public const string PagePath = "/maplestory-classic/tempo-desktop";
         private const int CodeRenewalsUnseen = 2;
+        /// <summary>How long the program waits for the page's "flushed" before it closes or updates all the same.</summary>
+        public const int FlushMs = 5000;
+        /// <summary>A page loaded unseen that did not say it is there in this long is closed and tried again later.</summary>
+        private const int UnseenLoadMs = 120000;
+        /// <summary>After an unseen load that could not be done (the site out of reach), the next try waits this long.</summary>
+        private const int UnseenRetryMs = 60000;
 
         private readonly Settings _settings;
         private readonly Api _api;
@@ -39,9 +49,14 @@ namespace GameMargins.Uploader
         private int _codeRenewals;
         private bool _opening;
         private bool _startWhenReady;
-        private IntPtr _startedFor = IntPtr.Zero;
         private bool _disposed;
         private bool _asking;
+        /// <summary>Not before this time is the page loaded unseen again, after a try that failed.</summary>
+        private DateTime _unseenAgain = DateTime.MinValue;
+        /// <summary>A "flush" the page has not answered yet: its answer, or null.</summary>
+        private TaskCompletionSource<bool> _flushing;
+        /// <summary>"Open Tempo" was pressed while the window was on its way unseen: it comes to the front.</summary>
+        private bool _frontWhenOpen;
         /// <summary>The site answered 403 to opening Tempo for this account (set by the start route's answer; a picture sets it too).</summary>
         public bool SiteRefused;
 
@@ -67,11 +82,15 @@ namespace GameMargins.Uploader
         public string ProblemTone = "";
         /// <summary>Windows has no WebView2 runtime: MapleStory's page offers Microsoft's download.</summary>
         public bool RuntimeMissing;
-        /// <summary>The page's session: idle, reading or paused; and whether it holds numbers.</summary>
+        /// <summary>The page's farm session: idle, reading or paused; and whether it holds numbers.</summary>
         public string SessionState = "idle";
         public bool Numbers;
+        /// <summary>The page said it reads the game right now, session or not.</summary>
+        public bool PageReading;
         /// <summary>Whether the game's window was found at the last look; null while the program is not looking.</summary>
         public bool? GameFound;
+        /// <summary>A picture's made-up state (Shots.cs): Tempo watches the game. Never set by the program itself.</summary>
+        public bool PictureWatching;
         /// <summary>The session's seconds as the page said them last, and when it said so.</summary>
         public double SessionSeconds;
         public DateTime SessionSaid;
@@ -94,11 +113,18 @@ namespace GameMargins.Uploader
         }
 
         public bool Linked { get { return !string.IsNullOrEmpty(_settings.TempoToken); } }
-        public bool Watching { get { return _window != null && _window.Watching; } }
+        /// <summary>The program hands the page the game's window right now: Tempo reads (the green dot by the clock).</summary>
+        public bool Watching { get { return PictureWatching || (_window != null && _window.Watching); } }
         public bool WindowOpen { get { return _window != null; } }
-        /// <summary>A session the player would lose: Tempo reads, or is paused with numbers. The window's cross only hides it then, and the program does not update itself.</summary>
-        public bool SessionLive { get { return Watching || SessionState == "reading" || (SessionState == "paused" && Numbers); } }
+        /// <summary>A farm session the player would lose: it runs, or it is paused with numbers. The window's cross only hides it then.</summary>
+        public bool SessionLive { get { return SessionState == "reading" || (SessionState == "paused" && Numbers); } }
+        /// <summary>The farm session runs: the program does not update itself meanwhile (a paused one is kept on the account already).</summary>
+        public bool SessionRunning { get { return SessionState == "reading"; } }
+        /// <summary>The Tempo window stays (hidden by its cross) while the game is open, Tempo reads, or a session would be lost.</summary>
+        public bool KeepsWindow { get { return GameFound == true || Watching || SessionLive; } }
         public bool Consent { get { return _settings.TempoConsent || Program.TestOpen; } }
+        /// <summary>Looking is off because the player turned it off himself (not "No, not now", not never asked).</summary>
+        public bool TurnedOff { get { return !Consent && _settings.TempoTurnedOff; } }
         /// <summary>The site refused to open Tempo for this account just now. Not kept between starts: a new start asks afresh.</summary>
         public bool Refused { get { return Linked && SiteRefused; } }
 
@@ -185,15 +211,73 @@ namespace GameMargins.Uploader
             Look();
         }
 
-        /// <summary>MapleStory was turned off: everything of Tempo closes; the link to the account stays.</summary>
+        /// <summary>MapleStory was turned off: everything of Tempo closes, after the page sent what it read; the link to the account stays.</summary>
         public void End()
         {
             _poll.Stop();
             _look.Stop();
             Link = null;
             GameFound = null;
-            CloseWindow();
+            Retire(false);
             Tell();
+        }
+
+        /// <summary>
+        /// Tempo stops: the page stops looking at once (a running session pauses and is kept), sends what it read, and
+        /// then the window closes. `consent`: only while the player has not said yes again meanwhile.
+        /// </summary>
+        private async void Retire(bool consent)
+        {
+            var window = _window;
+            if (window == null) return;
+            Command("stop");
+            window.EndWatching();
+            await Flush();
+            if (consent && _settings.TempoConsent) return;
+            if (!ReferenceEquals(_window, window)) return;
+            await window.LeavePage();
+            if (ReferenceEquals(_window, window)) CloseWindow();
+        }
+
+        /// <summary>The page leaves before the window closes (Quit, an update), so what it sends as it goes still carries the token.</summary>
+        public async Task Leave()
+        {
+            var window = _window;
+            if (window != null) await window.LeavePage();
+        }
+
+        /// <summary>
+        /// Asks the page to send what it read so far (the program is about to close or update itself) and waits for its
+        /// "flushed", FlushMs at most: without an answer the program goes on all the same.
+        /// </summary>
+        public async Task Flush()
+        {
+            var window = _window;
+            if (window == null || !window.Ready) return;
+            var waiting = _flushing;
+            if (waiting == null)
+            {
+                waiting = new TaskCompletionSource<bool>();
+                _flushing = waiting;
+                window.Post(new Dictionary<string, object> { { "type", "command" }, { "action", "flush" } });
+            }
+            await Task.WhenAny(waiting.Task, Task.Delay(FlushMs));
+            if (ReferenceEquals(_flushing, waiting)) _flushing = null;
+        }
+
+        /// <summary>The page answered "flush": what it had to send went.</summary>
+        public void OnFlushed()
+        {
+            var waiting = _flushing;
+            _flushing = null;
+            if (waiting != null) waiting.TrySetResult(true);
+        }
+
+        /// <summary>Quit: the Tempo window and the float go out of sight at once; the page runs on until it is flushed and closed.</summary>
+        public void HideAll()
+        {
+            HideFloat();
+            if (_window != null) _window.HideNow();
         }
 
         // ------------------------------------------------------------------------------------------------ linking
@@ -353,21 +437,16 @@ namespace GameMargins.Uploader
         {
             _settings.TempoConsent = true;
             _settings.TempoAsked = true;
+            _settings.TempoTurnedOff = false;
             _settings.Save();
             Tell();
         }
 
-        public void SetStartWithGame(bool on)
+        /// <summary>"Put my shop online by itself": kept for the page, which acts on it.</summary>
+        public void SetShopAuto(bool on)
         {
-            _settings.StartTempoWithGame = on;
+            _settings.ShopAuto = on;
             _settings.Save();
-            // A game that is already running when the switch is set is not started for: the switch is about the next start of the game.
-            if (on)
-            {
-                var found = Find();
-                _startedFor = found != null ? found.Handle : IntPtr.Zero;
-            }
-            Look();
             SendState();
             Tell();
         }
@@ -394,10 +473,14 @@ namespace GameMargins.Uploader
             return GameWindow.Find(test ? Program.TestWindow : GameWindow.GameTitle, test);
         }
 
-        /// <summary>Every few seconds, and only while the switch is on or the Tempo window is open: is the game's window there?</summary>
+        /// <summary>
+        /// Every few seconds, once linked and with the player's yes: is the game's window there? While it is (and not
+        /// minimised) the Tempo page reads it: loaded in a window that is not shown, the first time, and asked to read
+        /// whenever it does not watch.
+        /// </summary>
         private void Look()
         {
-            if (_disposed || !_settings.Maple || !Linked || Refused || !Consent || !(_settings.StartTempoWithGame || _window != null))
+            if (_disposed || !_settings.Maple || !SiteAllowed || !Linked || Refused || !Consent || CantLook)
             {
                 if (GameFound != null)
                 {
@@ -416,38 +499,64 @@ namespace GameMargins.Uploader
                 SendState();
                 Tell();
             }
-            if (!there)
+            if (!there || found.Minimised) return;
+            if (_window == null)
             {
-                _startedFor = IntPtr.Zero;
+                if (!_opening && !RuntimeMissing && DateTime.UtcNow >= _unseenAgain)
+                {
+                    var open = OpenTempo(false, Opening.Unseen);
+                    GC.KeepAlive(open);
+                }
                 return;
             }
-            // The game was started: Tempo opens (minimised, the game keeps the keyboard) and starts, once per game window.
-            if (_settings.StartTempoWithGame && found.Handle != _startedFor && !found.Minimised && !SessionLive && !_opening)
+            if (!_window.Ready)
             {
-                _startedFor = found.Handle;
-                var open = OpenTempo(true, true);
-                GC.KeepAlive(open);
+                // A page loaded unseen that never said it is there (the site out of reach): closed, and tried again later.
+                if (!_window.Visible && (DateTime.UtcNow - _window.MadeAt).TotalMilliseconds > UnseenLoadMs)
+                {
+                    Tempo.Log("the Tempo page did not load unseen; trying again later");
+                    _unseenAgain = DateTime.UtcNow.AddMilliseconds(UnseenRetryMs);
+                    CloseWindow();
+                }
+                return;
             }
+            if (!_window.Watching) Command("read");
         }
 
         // ------------------------------------------------------------------------------------------------ the Tempo window
 
+        /// <summary>How the Tempo window comes: in front; minimised without taking the keyboard (a test start); or not shown at all (Tempo reads, nobody asked for the window).</summary>
+        internal enum Opening { Front, Quiet, Unseen }
+
         /// <summary>
-        /// Opens the Tempo window (or brings it to the front). `start`: ask the page to start watching once it is there.
-        /// `quiet`: minimised and without taking the keyboard.
+        /// Opens the Tempo window (or brings it to the front). `start`: ask the page to start the farm session once it is
+        /// there. `quiet`: minimised and without taking the keyboard.
         /// </summary>
-        public async Task OpenTempo(bool start, bool quiet)
+        public Task OpenTempo(bool start, bool quiet)
         {
-            if (!_settings.Maple || !Linked || !Consent || !SiteAllowed || _opening) return;
+            return OpenTempo(start, quiet ? Opening.Quiet : Opening.Front);
+        }
+
+        internal async Task OpenTempo(bool start, Opening how)
+        {
+            if (!_settings.Maple || !Linked || !Consent || !SiteAllowed) return;
+            // Already on its way (perhaps unseen): it comes as the player asks now.
+            if (_opening)
+            {
+                if (how == Opening.Front) _frontWhenOpen = true;
+                if (start) _startWhenReady = true;
+                return;
+            }
             // After a refusal nothing opens: "Try again" (CheckAccess) is the way back.
             if (Refused && _window == null) return;
             if (_window != null)
             {
-                if (!quiet) _window.ShowFront();
+                if (how == Opening.Front) _window.ShowFront();
                 if (start) Command("start");
                 return;
             }
             _opening = true;
+            var unseen = how == Opening.Unseen;
             try
             {
                 Problem = null;
@@ -476,19 +585,24 @@ namespace GameMargins.Uploader
                 {
                     Problem = Texts.T("Can't reach {0}; trying again later.", Host());
                     ProblemTone = "negative";
+                    if (unseen) _unseenAgain = DateTime.UtcNow.AddMilliseconds(UnseenRetryMs);
                     Tell();
                     return;
                 }
                 SetRefused(false);
-                _startWhenReady = start;
+                _startWhenReady = _startWhenReady || start;
+                // In the program's language: the site's address for it ("/nl/maplestory-classic/tempo-desktop").
+                page = InLanguage(page, Texts.Language);
                 _window = new TempoWindow(this, _settings, page);
                 var window = _window;
                 window.FormClosed += delegate { WindowClosed(window); };
-                window.Open(quiet);
+                window.Open(_frontWhenOpen ? Opening.Front : how);
+                _frontWhenOpen = false;
                 if (!await window.LoadPage())
                 {
                     Problem = Texts.T("The Tempo window could not start.");
                     ProblemTone = "negative";
+                    if (unseen) _unseenAgain = DateTime.UtcNow.AddMilliseconds(UnseenRetryMs);
                     CloseWindow();
                 }
                 Look();
@@ -497,7 +611,64 @@ namespace GameMargins.Uploader
             finally
             {
                 _opening = false;
+                // What was asked on the way is for the window that came; none came, so nothing waits.
+                _frontWhenOpen = false;
+                if (_window == null) _startWhenReady = false;
             }
+        }
+
+        /// <summary>
+        /// The Tempo page's address in `language`, as the site writes its languages: "/nl/maplestory-classic/tempo-desktop"
+        /// (and de, fr, es, pt-br); English without one. Whatever language the address had goes first; its query stays.
+        /// </summary>
+        internal static Uri InLanguage(Uri page, string language)
+        {
+            var path = TempoWindow.WithoutLanguage(page.AbsolutePath);
+            var known = Array.IndexOf(Texts.Languages, language) >= 0;
+            var b = new UriBuilder(page) { Path = known && language != "en" ? "/" + language + path : path };
+            return b.Uri;
+        }
+
+        /// <summary>The page's language is due to change once no session would be lost (the program's language changed meanwhile).</summary>
+        private bool _languageWaits;
+
+        /// <summary>
+        /// The program's language changed (Settings › Language, or the account's language when the player picked none): the
+        /// Tempo page loads again in it, after it sent what it read (flush), and only when no farm session would be lost
+        /// (a running one, or a paused one with numbers, is not kept across a load): then as soon as it is gone (after
+        /// Reset). A window that is not there opens in the new language anyway.
+        /// </summary>
+        public void LanguageChanged()
+        {
+            if (_window == null || _disposed) return;
+            if (_window.Page.AbsolutePath == InLanguage(_window.Page, Texts.Language).AbsolutePath)
+            {
+                _languageWaits = false;
+                return;
+            }
+            if (SessionLive)
+            {
+                _languageWaits = true;
+                return;
+            }
+            ReloadInLanguage();
+        }
+
+        private async void ReloadInLanguage()
+        {
+            _languageWaits = false;
+            var window = _window;
+            if (window == null) return;
+            // Still on its way: once it says it is there.
+            if (!window.Ready)
+            {
+                _languageWaits = true;
+                return;
+            }
+            await Flush();
+            if (!ReferenceEquals(_window, window) || window.IsDisposed || SessionLive) return;
+            Tempo.Log("the Tempo page loads again in " + Texts.Language);
+            window.LoadAgain(InLanguage(window.Page, Texts.Language));
         }
 
         /// <summary>The page to load must be the Tempo page on the site this program talks to.</summary>
@@ -520,7 +691,9 @@ namespace GameMargins.Uploader
             HideFloat();
             SessionState = "idle";
             Numbers = false;
+            PageReading = false;
             _startWhenReady = false;
+            OnFlushed();
             Look();
             Tell();
         }
@@ -533,7 +706,11 @@ namespace GameMargins.Uploader
             if (ReferenceEquals(_window, window)) WindowClosed(window);
         }
 
-        /// <summary>A button's press goes to the page, which owns the session: "start", "stop" or "reset".</summary>
+        /// <summary>
+        /// A button's press goes to the page, which owns the farm session: "start" (start or continue it), "stop" (pause
+        /// it), "reset"; the float's answers about the player's own shop, "shop-always" and "shop-not-now"; and "read"
+        /// (the game's window is there to be looked at).
+        /// </summary>
         public void Command(string action)
         {
             if (_window == null) return;
@@ -545,12 +722,29 @@ namespace GameMargins.Uploader
             _window.Post(new Dictionary<string, object> { { "type", "command" }, { "action", action } });
         }
 
-        /// <summary>The tray's "Stop watching".</summary>
-        public void StopWatching()
+        /// <summary>The menu's "Start session" and "Continue session": the page starts or continues the farm session, loading unseen first when it is not there yet.</summary>
+        public void StartSession()
+        {
+            if (_window != null)
+            {
+                Command("start");
+                return;
+            }
+            var open = OpenTempo(true, Opening.Unseen);
+            GC.KeepAlive(open);
+        }
+
+        /// <summary>The menu's "Pause session". Tempo goes on reading; only the farm session pauses.</summary>
+        public void PauseSession()
         {
             Command("stop");
         }
 
+        /// <summary>
+        /// What the program is, for the page: `always`, it reads whenever it runs with the game open (the page asks to
+        /// watch as soon as `game` is "found", never asks to stop for a pause, and Start, Pause, Continue and Reset are the
+        /// farm session's alone); `totals`, the float draws its numbers as totals with their words; and its switches.
+        /// </summary>
         private void SendState()
         {
             if (_window == null || !_window.Ready) return;
@@ -563,6 +757,12 @@ namespace GameMargins.Uploader
                 { "float", new Dictionary<string, object> { { "open", _float != null && _float.Open }, { "size", _float != null ? _float.SizeName : _settings.FloatSize }, { "locked", _settings.FloatLocked } } },
                 { "startWithGame", _settings.StartTempoWithGame },
                 { "settings", true },
+                { "always", true },
+                { "totals", true },
+                { "shopAuto", _settings.ShopAuto },
+                // Tempo's own Settings may turn "Tempo may look at the MapleStory window" off (setting consent): always on
+                // while the page runs, as without it the program closes the page.
+                { "consent", true },
             });
         }
 
@@ -570,18 +770,23 @@ namespace GameMargins.Uploader
 
         public void OnReady()
         {
-            Look();
             if (GameFound == null)
             {
                 try { GameFound = Find() != null; } catch (Exception) { }
             }
+            // The state first: the page reads from it (with the game there) and then hears "read" from the looks.
             SendState();
-            if (_settings.FloatShown) ShowFloat(true, true);
+            Look();
+            // The float comes as it was the last time: shown only when it was, and only with the game (without it, it
+            // waits out of sight and comes when the game does).
+            if (_settings.FloatShown) ShowFloat(true, true, true);
             if (_startWhenReady)
             {
                 _startWhenReady = false;
                 Command("start");
             }
+            // The program's language changed while the page was on its way.
+            if (_languageWaits) LanguageChanged();
             Tell();
         }
 
@@ -590,6 +795,8 @@ namespace GameMargins.Uploader
         {
             SessionState = "idle";
             Numbers = false;
+            PageReading = false;
+            OnFlushed();
             Tell();
         }
 
@@ -599,15 +806,19 @@ namespace GameMargins.Uploader
             Tell();
         }
 
-        public void OnSession(string state, bool numbers, double seconds)
+        /// <summary>The page's farm session (`state`, `numbers`, `seconds`), and whether the page reads the game right now (`reading`).</summary>
+        public void OnSession(string state, bool numbers, double seconds, bool reading)
         {
             var next = state == "reading" || state == "paused" ? state : "idle";
             // How long the session has counted, as the page said it just now: the menu by the clock writes the minutes from it.
             SessionSeconds = Math.Max(0, seconds);
             SessionSaid = DateTime.UtcNow;
-            if (next == SessionState && numbers == Numbers) return;
+            if (next == SessionState && numbers == Numbers && reading == PageReading) return;
             SessionState = next;
             Numbers = numbers;
+            PageReading = reading;
+            // The language changed during a session: the page loads in it now that no session would be lost.
+            if (_languageWaits && !SessionLive) LanguageChanged();
             Tell();
         }
 
@@ -623,10 +834,53 @@ namespace GameMargins.Uploader
         /// <summary>A switch of the page's own Settings list: kept here, acted on, and answered with the state.</summary>
         public void OnSetting(string name, bool value)
         {
+            if (name == "consent")
+            {
+                // "Tempo may look at the MapleStory window" off in Tempo's own Settings: as the switch in the program's
+                // Settings does (TakeConsent). Not from inside the page's own event: the window goes on the next turn.
+                // On asks nothing (the page runs only with it on); turning it on again is the program's question.
+                if (value)
+                {
+                    SendState();
+                    return;
+                }
+                var timer = new Timer { Interval = 50 };
+                timer.Tick += delegate
+                {
+                    timer.Stop();
+                    timer.Dispose();
+                    if (!_disposed && _settings.TempoConsent) TakeConsent();
+                };
+                timer.Start();
+                return;
+            }
             if (name == "floatLocked") SetFloatLocked(value);
-            else if (name == "startWithGame") SetStartWithGame(value);
+            else if (name == "shopAuto") SetShopAuto(value);
+            else if (name == "startWithGame")
+            {
+                // A page from before Tempo read always may still send it: kept as it is said, and nothing else.
+                _settings.StartTempoWithGame = value;
+                _settings.Save();
+            }
             else return;
             SendState();
+        }
+
+        /// <summary>
+        /// A screen came or went, or the screens were arranged anew (`afterChange`), or it is the look every two seconds
+        /// (Screens.cs): the Tempo window goes where it shows; after a change the float goes to its place at the game too.
+        /// </summary>
+        public void ScreensChanged(ScreenInfo[] screens, bool afterChange)
+        {
+            if (_window != null && !_window.IsDisposed) _window.KeepOnScreen(screens, afterChange);
+            if (afterChange && _float != null && !_float.IsDisposed) _float.ScreensChanged();
+        }
+
+        /// <summary>Where the Tempo window stands, for tempo.log's line about the screens.</summary>
+        public string WindowText()
+        {
+            if (_window == null || _window.IsDisposed) return "the Tempo window: not open";
+            return "the Tempo window: " + _window.StateText();
         }
 
         /// <summary>Windows switched between light and dark: the float draws again in the new mode.</summary>
@@ -636,24 +890,18 @@ namespace GameMargins.Uploader
             if (_window != null && !_window.IsDisposed) _window.LookChanged();
         }
 
-        /// <summary>"Tempo may look at the MapleStory window" was turned off in Settings: Tempo stops (the page keeps its session first) and closes.</summary>
+        /// <summary>
+        /// "Tempo may look at the MapleStory window" was turned off in Settings: Tempo stops looking at once (a running
+        /// session pauses and is kept), the page sends what it read, and the window closes.
+        /// </summary>
         public void TakeConsent()
         {
             _settings.TempoConsent = false;
             _settings.TempoAsked = true;
+            // The player turned it off himself: the window says so and offers to turn it back on (pick 3 A of 25 November 2026).
+            _settings.TempoTurnedOff = true;
             _settings.Save();
-            if (_window != null)
-            {
-                Command("stop");
-                var timer = new Timer { Interval = SessionLive ? 2500 : 50 };
-                timer.Tick += delegate
-                {
-                    timer.Stop();
-                    timer.Dispose();
-                    if (!_settings.TempoConsent) CloseWindow();
-                };
-                timer.Start();
-            }
+            Retire(true);
             Look();
             Tell();
         }
@@ -680,6 +928,12 @@ namespace GameMargins.Uploader
         /// <summary>Shows or hides the float and remembers the choice. `tellPage`: the change did not come from the page, so the page hears of it.</summary>
         private void ShowFloat(bool on, bool tellPage)
         {
+            ShowFloat(on, tellPage, false);
+        }
+
+        /// <summary>`withGameOnly`: the float comes back as it was (not asked for just now), so it shows only while the game's window is there and waits for it otherwise.</summary>
+        private void ShowFloat(bool on, bool tellPage, bool withGameOnly)
+        {
             if (_settings.FloatShown != on)
             {
                 _settings.FloatShown = on;
@@ -699,7 +953,7 @@ namespace GameMargins.Uploader
                     _float.SetLocked(_settings.FloatLocked);
                     if (_floatValues != null) _float.SetValues(_floatValues);
                 }
-                _float.ShowAt(_window.WatchedBounds);
+                _float.ShowAt(_window.WatchedBounds, withGameOnly);
             }
             else if (!on) HideFloat();
             if (tellPage && _window != null && _window.Ready)

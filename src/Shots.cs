@@ -4,7 +4,10 @@
 //
 // Every screen of the program's window (the first start's steps for one game and for two, Overview, MapleStory
 // Classic, WoW: Forever, Settings; a program used for WoW: Forever alone; the page of an account the site refused Tempo,
-// and of a Windows that can't look at a window), the float (both sizes; waiting, reading, paused, not started), the menu by the
+// and of a Windows that can't look at a window; Tempo reading before Start, paused and without the game), the float (both
+// sizes and the bar; waiting, reading, paused, not started; and as a page sends it with totals and the own shop: not
+// started, a profit, a loss, eight digits, paused, the shop's question, online and open, and a shop on a map with a long
+// name, which goes on to a second line), the menu by the
 // clock and a drawing of a notification, each in dark and in light, at 100% and at 150%, as PNGs in the folder
 // ("<name>-dark.png", "<name>-light@1.5.png"). Everything is drawn straight into a picture with made-up states: no
 // window is created or shown, the keyboard and the screen are left alone, nothing is asked of the site, and the
@@ -47,6 +50,7 @@ namespace GameMargins.Uploader
             s.TempoToken = null;
             s.TempoConsent = false;
             s.TempoAsked = false;
+            s.TempoTurnedOff = false;
             s.StartWithWindows = true;
             s.KeepProgramUpdated = true;
             s.KeepAddonUpdated = true;
@@ -72,6 +76,7 @@ namespace GameMargins.Uploader
             _tempo.LinkTone = "";
             _tempo.GameFound = null;
             _tempo.SessionState = "idle";
+            _tempo.PictureWatching = false;
             _tickMaple = true;
             _tickWow = false;
             _tempo.SiteRefused = false;
@@ -172,6 +177,31 @@ namespace GameMargins.Uploader
                     wow();
                     _page = "maple";
                     break;
+
+                // ---- Tempo reads whenever MapleStory is open: before Start, during a pause, and without the game.
+                case "maplestory-classic-reads-not-started":
+                case "overview-reads-not-started":
+                    linked();
+                    wow();
+                    _tempo.SessionState = "idle";
+                    _tempo.PictureWatching = true;
+                    _page = name.StartsWith("overview", StringComparison.Ordinal) ? "overview" : "maple";
+                    break;
+                case "maplestory-classic-reads-paused":
+                    linked();
+                    wow();
+                    _tempo.SessionState = "paused";
+                    _tempo.SessionSeconds = 12 * 60 + 4;
+                    _tempo.PictureWatching = true;
+                    _page = "maple";
+                    break;
+                case "maplestory-classic-no-game":
+                    linked();
+                    wow();
+                    _tempo.SessionState = "idle";
+                    _tempo.GameFound = false;
+                    _page = "maple";
+                    break;
                 case "wow-forever":
                     linked();
                     wow();
@@ -234,6 +264,21 @@ namespace GameMargins.Uploader
                     _page = "overview";
                     break;
 
+                // ---- Looking turned off by the player himself (the owner's pick 3 A of 25 November 2026: "Tempo is off: you
+                // turned it off yourself" and "Turn back on"), and after "No, not now" (its words as before).
+                case "overview-turned-off":
+                case "maplestory-classic-turned-off":
+                case "maplestory-classic-not-now":
+                    linked();
+                    wow();
+                    s.TempoConsent = false;
+                    s.TempoAsked = true;
+                    s.TempoTurnedOff = name.EndsWith("-turned-off", StringComparison.Ordinal);
+                    _tempo.SessionState = "idle";
+                    _tempo.PictureWatching = false;
+                    _page = name.StartsWith("overview", StringComparison.Ordinal) ? "overview" : "maple";
+                    break;
+
                 // ---- A Windows that can't hand over a window's picture (before Windows 10 version 1903).
                 case "maplestory-classic-old-windows":
                     linked();
@@ -272,6 +317,21 @@ namespace GameMargins.Uploader
             }
             return TrayLines();
         }
+
+        /// <summary>
+        /// The menu while Tempo reads MapleStory and the farm session is `session` ("idle", "paused"), or without the game
+        /// (`game` false): MapleStory alone, or both games (`both`).
+        /// </summary>
+        internal List<TrayLine> SceneMenuReads(bool both, string session, bool game)
+        {
+            Scene(both ? "overview" : "overview-one-game");
+            _tempo.SessionState = session;
+            _tempo.SessionSeconds = 12 * 60 + 4;
+            _tempo.SessionSaid = default(DateTime);
+            _tempo.GameFound = game;
+            _tempo.PictureWatching = game;
+            return TrayLines();
+        }
     }
 
     internal static class Shots
@@ -285,6 +345,10 @@ namespace GameMargins.Uploader
             "wow-only-overview", "wow-only-wow-forever", "wow-only-settings",
             "maplestory-classic-refused", "maplestory-classic-refused-no-site", "overview-refused",
             "maplestory-classic-old-windows", "overview-old-windows",
+            // Tempo reads whenever MapleStory is open: before Start, during a pause, and the game not running.
+            "maplestory-classic-reads-not-started", "maplestory-classic-reads-paused", "maplestory-classic-no-game", "overview-reads-not-started",
+            // Looking turned off by the player himself, and after "No, not now".
+            "overview-turned-off", "maplestory-classic-turned-off", "maplestory-classic-not-now",
         };
 
         /// <summary>The menu by the clock in the states it has beside "two games" and "MapleStory only": a picture's name and the scene it shows.</summary>
@@ -292,6 +356,7 @@ namespace GameMargins.Uploader
         {
             new[] { "menu-wow-only", "wow-only-overview" },
             new[] { "menu-refused", "overview-refused" },
+            new[] { "menu-turned-off", "overview-turned-off" },
         };
 
         public static int All(string folder)
@@ -343,10 +408,20 @@ namespace GameMargins.Uploader
                             RealFloat(Path.Combine(folder, "float-small-real-locked" + tail), scale, light, Size.Empty, null, true, true);
                             // The bar in every state, all states on one sheet, and the button that goes round with its name card.
                             BarShots(folder, tail, scale, light);
+                            // The numbers as totals with their words, and the own shop, in the three sizes.
+                            TotalsShots(folder, tail, scale, light);
                             // Windows' own menu, filled and laid out as by the clock (never shown), with the longest first line.
                             RealMenuCheck(LongStateMenu(form), "picture", Texts.Language, new KeyValuePair<string, float>(Path.Combine(folder, "menu-real-long-first-line" + tail), scale));
+                            RealMenuCheck(form.SceneMenuReads(false, "idle", true), "picture", Texts.Language, new KeyValuePair<string, float>(Path.Combine(folder, "menu-real-reads-not-started" + tail), scale));
                             Menu(form.SceneMenu(true), Path.Combine(folder, "menu-two-games" + tail), scale);
                             Menu(form.SceneMenu(false), Path.Combine(folder, "menu-maplestory-only" + tail), scale);
+                            // Tempo reads MapleStory: the session not started (as drawn), paused, and the game not running; and with WoW too.
+                            Menu(form.SceneMenuReads(false, "idle", true), Path.Combine(folder, "menu-reads-not-started" + tail), scale);
+                            Menu(form.SceneMenuReads(false, "paused", true), Path.Combine(folder, "menu-reads-paused" + tail), scale);
+                            Menu(form.SceneMenuReads(false, "idle", false), Path.Combine(folder, "menu-no-game" + tail), scale);
+                            Menu(form.SceneMenuReads(true, "idle", true), Path.Combine(folder, "menu-two-games-reads-not-started" + tail), scale);
+                            // Where the menu opens: by the clock on a screen at 100%, and from the hidden icons on a screen at 150%.
+                            if (scale == 1f) MenuPlaceShots(form, folder, light);
                             foreach (var menu in Menus) Menu(form.SceneMenuOf(menu[1]), Path.Combine(folder, menu[0] + tail), scale);
                             Toast(ToastTexts.UploadFailed("unreadable"), Path.Combine(folder, "notification-upload-failed" + tail), scale, light);
                             Toast(ToastTexts.Unlinked(), Path.Combine(folder, "notification-link-again" + tail), scale, light);
@@ -376,6 +451,12 @@ namespace GameMargins.Uploader
                             MenuCheck(LongestStatusLines(), "every status line", language);
                             RealMenuCheck(LongStateMenu(form), "MapleStory open, Tempo not started", language, null);
                             RealMenuCheck(form.SceneMenu(true), "two games", language, null);
+                            // The longer lines of Tempo reading always: "Tempo reads MapleStory · session not started", "… · session paused · 12 min".
+                            foreach (var reads in new[] { new { Both = false, Session = "idle", Game = true, What = "Tempo reads, session not started" }, new { Both = true, Session = "idle", Game = true, What = "two games, Tempo reads, session not started" }, new { Both = true, Session = "paused", Game = true, What = "two games, Tempo reads, session paused" }, new { Both = false, Session = "idle", Game = false, What = "MapleStory not running" } })
+                            {
+                                MenuCheck(form.SceneMenuReads(reads.Both, reads.Session, reads.Game), reads.What, language);
+                                RealMenuCheck(form.SceneMenuReads(reads.Both, reads.Session, reads.Game), reads.What, language, null);
+                            }
                             foreach (var menu in Menus)
                             {
                                 MenuCheck(form.SceneMenuOf(menu[1]), menu[0], language);
@@ -387,6 +468,7 @@ namespace GameMargins.Uploader
                 }
                 FloatSweep();
                 BarSweep();
+                TotalsSweep();
                 var problems = Path.Combine(folder, "shots-problems.txt");
                 if (Problems.Count > 0) File.WriteAllLines(problems, Problems.ToArray());
                 else if (File.Exists(problems)) File.Delete(problems);
@@ -470,7 +552,9 @@ namespace GameMargins.Uploader
                 Texts.T("Tempo needs Microsoft's WebView2"),
                 Texts.T("Tempo is reading · {0}", "12 h 48 min"),
                 Texts.T("Tempo is paused · {0}", "12 h 48 min"),
-                Texts.T("Tempo is not started"),
+                Texts.T("Tempo reads MapleStory · session not started"),
+                Texts.T("Tempo reads MapleStory · session paused · {0}", "12 h 48 min"),
+                Texts.T("MapleStory is not running"),
                 Texts.T("The site did not open Tempo for this account"),
                 Texts.T("Tempo can't look at the game on this Windows"),
                 "WoW: " + Texts.T("Not linked to your account yet"),
@@ -591,6 +675,98 @@ namespace GameMargins.Uploader
                         if (!inked) Problems.Add(where + ": the menu printed empty, so nothing was checked.");
                         if (save.HasValue) bitmap.Save(save.Value.Key, ImageFormat.Png);
                     }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Where the menu by the clock opens (TrayMenu.Place, then kept above the taskbar as Windows keeps it), drawn on a
+        /// piece of a made-up screen around the pointer, at that screen's own scale: "menu-place-clock-100" (the icon by the
+        /// clock on a screen at 100%) and "menu-place-hidden-icons-150" (the icon among the hidden icons, on a second
+        /// screen at 150%, the menu as large as that screen draws it). A drawing of the rule, not of Windows: the real menu
+        /// is checked against every screen of the computer in the logic checks.
+        /// </summary>
+        private static void MenuPlaceShots(MainForm form, string folder, bool light)
+        {
+            var lines = form.SceneMenuReads(false, "idle", true);
+            var p = Look.Of(light);
+            foreach (var hidden in new[] { false, true })
+            {
+                var s = hidden ? 1.5f : 1f;
+                const int W = 1000, H = 640;
+                var bar = (int)Math.Round(48 * s);
+                var screen = new Rectangle(0, 0, W, H);
+                var work = new Rectangle(0, 0, W, H - bar);
+                Point pointer;
+                var flyout = Rectangle.Empty;
+                var cell = (int)Math.Round(40 * s);
+                if (hidden)
+                {
+                    // The hidden icons above the taskbar's arrow: two rows of four, the program's icon the second of the first row.
+                    flyout = new Rectangle(W - (int)Math.Round(330 * s), H - bar - (int)Math.Round(12 * s) - 2 * cell - (int)Math.Round(16 * s), 4 * cell + (int)Math.Round(16 * s), 2 * cell + (int)Math.Round(16 * s));
+                    pointer = new Point(flyout.Left + (int)Math.Round(8 * s) + cell + cell / 2, flyout.Top + (int)Math.Round(8 * s) + cell / 2);
+                }
+                else pointer = new Point(W - (int)Math.Round(150 * s), H - bar / 2);
+                var size = TrayPaint.Size(lines, s);
+                var menu = new Size((int)Math.Round(size.Width * s), (int)Math.Round(size.Height * s));
+                var at = TrayMenu.Place(pointer, menu, screen);
+                if (at.Bottom > work.Bottom) at.Y = work.Bottom - at.Height;
+                if (!work.Contains(at)) Problems.Add("menu place (" + (hidden ? "hidden icons, 150%" : "clock, 100%") + "): the menu at " + at + " is not inside the screen's work area " + work);
+                using (var bitmap = new Bitmap(W, H, PixelFormat.Format32bppArgb))
+                {
+                    using (var g = Graphics.FromImage(bitmap))
+                    {
+                        g.Clear(light ? Color.FromArgb(0xc9, 0xd3, 0xe0) : Color.FromArgb(0x10, 0x16, 0x24));
+                        g.SmoothingMode = SmoothingMode.AntiAlias;
+                        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+                        using (var taskbar = new SolidBrush(light ? Color.FromArgb(0xee, 0xf1, 0xf5) : Color.FromArgb(0x1c, 0x1c, 0x1c)))
+                        using (var ink = new SolidBrush(light ? Color.FromArgb(0x1a, 0x1a, 0x1a) : Color.FromArgb(0xf1, 0xf1, 0xf1)))
+                        using (var soft = new SolidBrush(light ? Color.FromArgb(0x5f, 0x5f, 0x5f) : Color.FromArgb(0xa0, 0xa0, 0xa0)))
+                        using (var mark = new SolidBrush(p.AccentFill))
+                        {
+                            // The program's fonts are kept for every drawing: not given back here.
+                            var font = Look.Font(12f * s, 0);
+                            g.FillRectangle(taskbar, 0, H - bar, W, bar);
+                            g.DrawString("14:26", font, ink, W - (int)Math.Round(70 * s), H - bar + bar / 2 - font.Height / 2);
+                            // The taskbar's arrow that opens the hidden icons, and the icons left of the clock.
+                            g.DrawString("^", font, ink, W - (int)Math.Round(230 * s), H - bar + bar / 2 - font.Height / 2);
+                            if (hidden)
+                            {
+                                using (var face = new SolidBrush(light ? Color.FromArgb(0xf9, 0xf9, 0xf9) : Color.FromArgb(0x2b, 0x2b, 0x2b)))
+                                using (var path = Look.Rounded(flyout, 8 * s))
+                                    g.FillPath(face, path);
+                                for (var i = 0; i < 8; i++)
+                                {
+                                    var x = flyout.Left + (int)Math.Round(8 * s) + (i % 4) * cell + cell / 2;
+                                    var y = flyout.Top + (int)Math.Round(8 * s) + (i / 4) * cell + cell / 2;
+                                    var r = (int)Math.Round(8 * s);
+                                    g.FillEllipse(i == 1 ? mark : soft, x - r, y - r, 2 * r, 2 * r);
+                                }
+                            }
+                            else
+                            {
+                                var r = (int)Math.Round(8 * s);
+                                g.FillEllipse(mark, pointer.X - r, pointer.Y - r, 2 * r, 2 * r);
+                                g.FillEllipse(soft, pointer.X - r - (int)Math.Round(32 * s), pointer.Y - r, 2 * r, 2 * r);
+                            }
+                            g.DrawString(hidden ? "A second screen at 150% · the icon among the hidden icons" : "A screen at 100% · the icon by the clock", Look.Font(15f, 1), ink, 16, 14);
+                            g.DrawString("The menu opens at the pointer, on this screen, at its scale", Look.Font(13f, 0), soft, 16, 40);
+                        }
+                        var state = g.Save();
+                        g.TranslateTransform(at.X, at.Y);
+                        TrayPaint.Menu(g, p, lines, s);
+                        g.Restore(state);
+                        // The pointer: an arrow with its tip at the point the menu was placed for.
+                        var a = new[] { new PointF(0, 0), new PointF(0, 17), new PointF(4.5f, 13), new PointF(8, 20), new PointF(10.5f, 19), new PointF(7, 12), new PointF(12.5f, 12) };
+                        for (var i = 0; i < a.Length; i++) a[i] = new PointF(pointer.X + a[i].X * s, pointer.Y + a[i].Y * s);
+                        using (var white = new SolidBrush(Color.White))
+                        using (var black = new Pen(Color.Black, 1.2f * s))
+                        {
+                            g.FillPolygon(white, a);
+                            g.DrawPolygon(black, a);
+                        }
+                    }
+                    bitmap.Save(Path.Combine(folder, (hidden ? "menu-place-hidden-icons-150" : "menu-place-clock-100") + "-" + (light ? "light" : "dark") + ".png"), ImageFormat.Png);
                 }
             }
         }
@@ -1066,8 +1242,8 @@ namespace GameMargins.Uploader
                                     var where = (small ? "small" : "large") + " float, " + v.State + " " + v.Clock + (locked ? " locked" : "") + " (" + language + ") at " + (int)(scale * 100) + "%: ";
                                     foreach (var p in hits.Problems) problem(where + p);
                                     if (!locked && (hits.Size.Width != FloatPainter.CycleWidth || hits.Size.Right > hits.Close.Left + 0.01f || hits.Close.Right > size.Width)) problem(where + "the head's buttons do not fit");
-                                    // A paused float's head says "Paused" beside the clock: it has to be there whole.
-                                    if (small && !locked && v.State == "paused" && !HeadShowsPlace(g, v, hits)) problem(where + "\"" + v.Place + "\" has no room beside the clock");
+                                    // A paused float's head says "Paused" beside the clock, or under it where it does not fit: whole, never left out.
+                                    if (!locked && v.State == "paused" && hits.HeadPlace != "beside" && hits.HeadPlace != "under") problem(where + "\"" + v.Place + "\" is not in the head");
                                 }
                             }
                         }
@@ -1077,18 +1253,332 @@ namespace GameMargins.Uploader
             Texts.Language = kept;
         }
 
-        /// <summary>Whether the small float's head has room for the place beside the clock (FloatPainter draws it when 30 or more is left).</summary>
-        private static bool HeadShowsPlace(Graphics g, FloatValues v, FloatHits hits)
+        // ------------------------------------------------------------------------------------------------ the totals and the own shop
+
+        private const string LongMap = "Victoria Road : Construction Site North of Kerning City";
+
+        private static FloatNumber Number(string total, string unit, string rate, string tone)
         {
-            using (var ruler = new Bitmap(1, 1))
-            using (var r = Graphics.FromImage(ruler))
+            return new FloatNumber { Total = total, Unit = unit, Rate = rate, Tone = tone };
+        }
+
+        /// <summary>
+        /// The float as a page sends it with `totals`: "not-started" (dashes, the level's bar known), "positive" (26:14 with a
+        /// profit), "negative" (26:14 with a loss), "big" (4:12:37: seven and eight digits, a loss of seven), "paused";
+        /// "shop-ask", "shop-online" and "shop-open" are "not-started" with the own shop. With `art` (GM_SHOTS_ART) the
+        /// monsters and their drops have the game's own pictures, else grey squares.
+        /// </summary>
+        private static FloatValues TotalsValues(string set, FloatImages images, string art)
+        {
+            // "nl-…": the same set as a page in Dutch sends it (the program opens the page in its own language).
+            if (set.StartsWith("nl-", StringComparison.Ordinal)) return Dutch(TotalsValues(set.Substring(3), images, art));
+            // "map-long", "map-middle", "map-short" (and "-first-minute", before the clock runs): a profit while reading on
+            // a map with that name, as the page sends it ("Victoria Road : …"); the head shows the map's own name, beside
+            // the clock where it fits, else under it, never cut.
+            if (set.StartsWith("map-", StringComparison.Ordinal))
             {
-                r.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
-                var room = hits.Strip.Width - 6 - 24;
-                var clock = r.MeasureString(v.Clock, Look.Font(13f, 1), 600, StringFormat.GenericTypographic).Width + 1;
-                var place = r.MeasureString(v.Place, Look.Font(12f, 0), 600, StringFormat.GenericTypographic).Width;
-                return room - clock > 30 && room - clock - 7 >= place;
+                var first = set.EndsWith("-first-minute", StringComparison.Ordinal);
+                var which = set.Substring(4).Replace("-first-minute", "");
+                var m = TotalsValues("positive", images, art);
+                m.Place = which == "long" ? LongMap : which == "middle" ? MiddleMap : ShortMap;
+                if (first) m.Clock = "";
+                return m;
             }
+            var shop = set.StartsWith("shop-", StringComparison.Ordinal) ? set.Substring(5) : null;
+            var idle = set == "not-started" || shop != null;
+            var big = set == "big";
+            var v = new FloatValues();
+            v.State = idle ? "idle" : set == "paused" ? "paused" : "reading";
+            v.SessionNo = 1;
+            v.Clock = idle ? "" : big ? "4:12:37" : "26:14";
+            v.Place = idle ? "Not started" : v.State == "paused" ? "Paused" : LongMap;
+            // What a site sends for 0.4.0 and 0.4.1 beside the totals; not drawn when the totals are there.
+            v.Rows.Add(new FloatRow { Label = "EXP / hour", Value = idle ? "–" : "48,212" });
+            v.Rows.Add(new FloatRow { Label = "Mesos / hour", Value = idle ? "–" : "31,870" });
+            v.Rows.Add(new FloatRow { Label = "Kills / hour", Value = idle ? "–" : "1,450" });
+            v.NextLabel = "Next level";
+            v.NextLevel = "";
+            v.NextValue = idle ? "–" : big ? "38 min" : "2 h 46 min";
+            v.NextIn = idle ? "–" : "in " + v.NextValue;
+            v.NextPercent = big ? 91.2 : 63.47;
+            if (idle) v.Totals = new[] { Number("–", "EXP", "", null), Number("–", "profit", "", null), Number("–", "mesos", "", null), Number("–", "", "to next level", null) };
+            else if (big) v.Totals = new[] { Number("1,284,377", "EXP", "305,118 / hour", null), Number("−1,204,550", "profit", "−286,160 / hour", "negative"), Number("12,480,300", "mesos", "2,964,712 / hour", null), Number("38 min", "", "to next level", null) };
+            else v.Totals = new[] { Number("21,083", "EXP", "48,212 / hour", null), set == "negative" ? Number("−5,450", "profit", "−12,480 / hour", "negative") : Number("+3,640", "profit", "+8,330 / hour", "positive"), Number("13,920", "mesos", "31,870 / hour", null), Number("2 h 46 min", "", "to next level", null) };
+            v.Stop = "Pause";
+            v.Start = v.State == "paused" ? "Continue" : "Start";
+            v.Reset = "Reset";
+            if (!idle)
+            {
+                // The drawings' three monsters with their drops.
+                var mobs = new[] { new[] { "18", "Jr. Necki", big ? "3,340 kills" : "151 kills" }, new[] { "17", "Stirge", big ? "2,036 kills" : "92 kills" }, new[] { "32", "Jr. Wraith", big ? "1,042 kills" : "47 kills" } };
+                var drops = big
+                    ? new[] { new[] { "4000018:1,352", "2000001:88", "4020000:21", "4010002:9" }, new[] { "4000017:688", "2000003:41" }, new[] { "4000028:402", "4010000:19" } }
+                    : new[] { new[] { "4000018:61", "2000001:4", "4020000:1" }, new[] { "4000017:31", "2000003:2" }, new[] { "4000028:19", "4010000:1" } };
+                for (var i = 0; i < mobs.Length; i++)
+                {
+                    var m = new FloatMonster { Key = mobs[i][0], Name = mobs[i][1], Kills = mobs[i][2], Picture = art != null ? Known(images, art, "mobs/" + mobs[i][0] + ".png") : null };
+                    foreach (var drop in drops[i])
+                    {
+                        var parts = drop.Split(':');
+                        m.Drops.Add(new FloatHereItem { Icon = art != null ? Known(images, art, "items/" + parts[0] + ".png") : null, Count = parts[1], Name = "item" });
+                    }
+                    v.Monsters.Add(m);
+                }
+            }
+            if (shop == "ask") v.Shop = new FloatShop { State = "ask", Title = "Put your shop on the Market?", Short = "Put your shop on the Market?", Note = "16 items · Channel 12 · Free Market <7>", Always = "Always", NotNow = "Not now" };
+            else if (shop == "online") v.Shop = new FloatShop { State = "online", Title = "Your shop is online · 16 offers", Short = "Shop online · 16 offers", Note = "Channel 12 · Free Market <7>" };
+            else if (shop == "open") v.Shop = new FloatShop { State = "open", Title = "Your shop is open · not online", Short = "Shop not online", Note = "Pick the channel or room in Tempo’s window" };
+            // A shop outside the Free Market, on a map with a long name (once cut as "Channel 14 · Victoria Road: The Hill East of
+            // H…"): the line goes on to a second one.
+            else if (shop == "ask-long-map") v.Shop = new FloatShop { State = "ask", Title = "Put your shop on the Market?", Short = "Put your shop on the Market?", Note = "16 items · " + ShopMap, Always = "Always", NotNow = "Not now" };
+            else if (shop == "online-long-map") v.Shop = new FloatShop { State = "online", Title = "Your shop is online · 16 offers", Short = "Shop online · 16 offers", Note = "Channel 14 · " + LongMap };
+            // The own shop's window closed in the game: the page says so at once and takes it off the Market some 20 seconds later.
+            else if (shop == "closing") v.Shop = new FloatShop { State = "open", Title = "Shop closed · going offline", Short = "Shop closed · going offline", Note = "" };
+            // A question longer than the small float is wide (a language with longer words): on two lines, the buttons under them.
+            // A shop that waits for the channel (the page's `wait`, pick 4 B of 25 November 2026): another player's shop Tempo
+            // could not send, and the own shop; an orange dot.
+            else if (shop == "wait-spotted") v.Shop = new FloatShop { State = "wait", Title = "Spotted, not on the Market", Short = "Spotted · channel unknown", Note = "Open Menu › Change Channel in the game: then the shops you open go to the Market." };
+            else if (shop == "wait-own") v.Shop = new FloatShop { State = "wait", Title = "Your shop waits for your channel", Short = "Shop waits for channel", Note = "Open Menu › Change Channel in the game: then it goes online by itself." };
+            else if (shop == "ask-long-question") v.Shop = new FloatShop { State = "ask", Title = "Put your own shop on the GameMargins Market now?", Short = "Put your own shop on the GameMargins Market now?", Note = "16 items · " + ShopMap, Always = "Always", NotNow = "Not now" };
+            return v;
+        }
+
+        /// <summary>A map of middle length and a short one, as the page names them.</summary>
+        private const string MiddleMap = "Victoria Road : The Hill East of Henesys", ShortMap = "Primeval Forest II";
+
+        /// <summary>The map of a shop on Victoria Road, whose name the float once cut.</summary>
+        private const string ShopMap = "Channel 14 · Victoria Road: The Hill East of Henesys";
+
+        /// <summary>
+        /// A set as a page in Dutch would send it: the words a Dutch page writes and Dutch numbers ("21.083"), so the float
+        /// is seen with the longer words of another language. Made up here, for the pictures: the page's own words are the
+        /// site's (its translations), only "– / uur" under a number without a rate and "vergrendeld" are the program's.
+        /// </summary>
+        private static FloatValues Dutch(FloatValues v)
+        {
+            Func<string, string> nl = delegate(string t)
+            {
+                if (string.IsNullOrEmpty(t)) return t;
+                t = t.Replace(",", ".").Replace(" / hour", " / uur").Replace("to next level", "tot volgend level").Replace(" h ", " u ");
+                switch (t)
+                {
+                    case "Not started": return "Niet gestart";
+                    case "Paused": return "Gepauzeerd";
+                    case "profit": return "winst";
+                    case "Put your shop on the Market?": return "Je winkel op de Markt zetten?";
+                    case "Your shop is online · 16 offers": return "Je winkel staat online · 16 aanbiedingen";
+                    case "Shop online · 16 offers": return "Winkel online · 16 aanbiedingen";
+                    case "Your shop is open · not online": return "Je winkel is open · niet online";
+                    case "Shop not online": return "Winkel niet online";
+                    case "Pick the channel or room in Tempo’s window": return "Kies het kanaal of de kamer in het venster van Tempo";
+                    case "Shop closed · going offline": return "Winkel dicht · gaat offline";
+                    // (The comma is a point here already: the numbers' commas became points above.)
+                    case "Spotted. not on the Market": return "Gespot, niet op de Markt";
+                    case "Spotted · channel unknown": return "Gespot · kanaal onbekend";
+                    case "Open Menu › Change Channel in the game: then the shops you open go to the Market.": return "Open in het spel Menu › Change Channel: dan gaan de winkels die je opent naar de Markt.";
+                    case "Your shop waits for your channel": return "Je winkel wacht op je kanaal";
+                    case "Shop waits for channel": return "Winkel wacht op kanaal";
+                    case "Open Menu › Change Channel in the game: then it goes online by itself.": return "Open in het spel Menu › Change Channel: dan gaat hij vanzelf online.";
+                }
+                return t.Replace("Channel ", "Kanaal ").Replace(" items", " spullen");
+            };
+            v.Place = nl(v.Place);
+            foreach (var n in v.Totals)
+            {
+                n.Total = nl(n.Total);
+                n.Unit = nl(n.Unit);
+                n.Rate = nl(n.Rate);
+            }
+            foreach (var m in v.Monsters) m.Kills = nl(m.Kills).Replace("kills", "kills");
+            v.Stop = "Pauzeren";
+            v.Start = v.State == "paused" ? "Doorgaan" : "Start";
+            v.Reset = "Opnieuw";
+            v.SmallLabel = "Klein";
+            v.LargeLabel = "Groot";
+            v.BarLabel = "Balk";
+            v.CloseLabel = "Sluiten";
+            if (v.Shop != null)
+            {
+                v.Shop.Title = nl(v.Shop.Title);
+                v.Shop.Short = nl(v.Shop.Short);
+                v.Shop.Note = nl(v.Shop.Note);
+                if (v.Shop.Always != null)
+                {
+                    v.Shop.Always = "Altijd";
+                    v.Shop.NotNow = "Nu niet";
+                }
+            }
+            return v;
+        }
+
+        private static readonly string[] TotalsSets =
+        {
+            "not-started", "positive", "negative", "big", "paused", "shop-ask", "shop-online", "shop-open", "shop-ask-long-map", "shop-online-long-map", "shop-ask-long-question", "shop-closing",
+            // A shop that waits for the channel: spotted, and the own one (pick 4 B of 25 November 2026).
+            "shop-wait-spotted", "shop-wait-own",
+            // The map's own name in the head: long, middle and short, with the clock and before it runs.
+            "map-long", "map-middle", "map-short", "map-long-first-minute", "map-middle-first-minute", "map-short-first-minute",
+            // The float in Dutch, as a page in Dutch sends it.
+            "nl-map-long", "nl-map-middle", "nl-map-short", "nl-map-long-first-minute",
+            "nl-not-started", "nl-positive", "nl-big", "nl-paused", "nl-shop-ask-long-map", "nl-shop-online-long-map", "nl-shop-open", "nl-shop-closing",
+            "nl-shop-wait-spotted", "nl-shop-wait-own",
+        };
+
+        /// <summary>
+        /// The float with totals in its three sizes for every set ("float-small-totals-positive", "float-large-totals-…",
+        /// "bar-totals-…"), and the bar with the own shop online beside a running session ("bar-totals-positive-shop-online").
+        /// </summary>
+        private static void TotalsShots(string folder, string tail, float scale, bool light)
+        {
+            var art = Environment.GetEnvironmentVariable("GM_SHOTS_ART");
+            if (string.IsNullOrEmpty(art) || !Directory.Exists(art)) art = null;
+            var kept = Texts.Language;
+            foreach (var set in TotalsSets)
+            {
+                // A Dutch page goes with a program in Dutch: the program's own words ("– / uur", "vergrendeld") too.
+                Texts.Language = set.StartsWith("nl-", StringComparison.Ordinal) ? "nl" : kept;
+                var word = Texts.T("locked");
+                var images = new FloatImages(null, null);
+                var v = TotalsValues(set, images, art);
+                foreach (var small in new[] { true, false })
+                {
+                    var size = FloatPainter.Measure(v, small, Size.Empty);
+                    using (var bitmap = new Bitmap((int)Math.Round(size.Width * scale), (int)Math.Round(size.Height * scale), PixelFormat.Format32bppArgb))
+                    {
+                        using (var g = Graphics.FromImage(bitmap))
+                        {
+                            var hits = FloatPainter.Paint(g, v, small, scale, null, 0, images, light, Size.Empty, false, null, word);
+                            foreach (var p in hits.Problems) Problems.Add((small ? "small" : "large") + " float with totals, " + set + ": " + p);
+                        }
+                        bitmap.Save(Path.Combine(folder, "float-" + (small ? "small" : "large") + "-totals-" + set + tail), ImageFormat.Png);
+                    }
+                }
+                TotalsBarShot(Path.Combine(folder, "bar-totals-" + set + tail), v, scale, light, word);
+            }
+            Texts.Language = kept;
+            var word2 = Texts.T("locked");
+            var withShop = TotalsValues("positive", new FloatImages(null, null), null);
+            withShop.Shop = TotalsValues("shop-online", new FloatImages(null, null), null).Shop;
+            TotalsBarShot(Path.Combine(folder, "bar-totals-positive-shop-online" + tail), withShop, scale, light, word2);
+        }
+
+        /// <summary>
+        /// What the head must show of the map (the "map-…" sets): its own name, without the region before " : ", whole. In
+        /// the large float at its usual width (unlocked) the long name stands under the clock, the others beside it; the
+        /// small float shows none while the clock runs, and the map's own name in the clock's place before it runs.
+        /// </summary>
+        private static void MapInHead(string set, FloatValues v, bool small, Size user, FloatHits hits, string name, Action<string> problem)
+        {
+            var at = set.IndexOf("map-", StringComparison.Ordinal);
+            if (at < 0) return;
+            var first = set.EndsWith("-first-minute", StringComparison.Ordinal);
+            var own = FloatPainter.OwnMapName(v.Place);
+            var bar = name.EndsWith("(bar) ", StringComparison.Ordinal);
+            if (small && !bar && !first)
+            {
+                if (hits.HeadMap != null) problem(name + "the small float shows a map beside its clock");
+                return;
+            }
+            if (hits.HeadMap != own) problem(name + "the head shows \"" + hits.HeadMap + "\", not the map's own name \"" + own + "\"");
+            if (bar || !user.IsEmpty || small || hits.Close.IsEmpty) return;
+            var which = set.Substring(at + 4).Replace("-first-minute", "");
+            if (!first && which == "long" && hits.HeadPlace != "under") problem(name + "the long name is not under the clock (" + hits.HeadPlace + ")");
+            if (!first && which != "long" && hits.HeadPlace != "beside") problem(name + "the " + which + " name is not beside the clock (" + hits.HeadPlace + ")");
+        }
+
+        private static void TotalsBarShot(string file, FloatValues v, float scale, bool light, string word)
+        {
+            var size = FloatPainter.MeasureBar(v, false, word, scale);
+            using (var bitmap = new Bitmap((int)Math.Round(size.Width * scale), (int)Math.Round(size.Height * scale), PixelFormat.Format32bppArgb))
+            {
+                using (var g = Graphics.FromImage(bitmap))
+                {
+                    var hits = FloatPainter.PaintBar(g, v, scale, null, light, false, word, size.Width);
+                    foreach (var p in hits.Problems) Problems.Add("bar with totals, " + Path.GetFileNameWithoutExtension(file) + ": " + p);
+                }
+                bitmap.Save(file, ImageFormat.Png);
+            }
+        }
+
+        /// <summary>
+        /// The float with totals in every set, in six languages (the word for "locked"), at the scales Windows offers most
+        /// (100% to 200%), locked and not: small, large (and dragged wider and taller) and the bar (at its width and wider).
+        /// Nothing may be cut or overlap: a total and its word fit their cell at 13.5, 11.5 or 10.5 (shrinking is fine,
+        /// cutting is not), the rate at 10.5 or 9.5, the shop's lines fit, its buttons lie inside the float and apart from
+        /// each other and from the round buttons, and the small size's cells keep clear of its round button.
+        /// </summary>
+        private static void TotalsSweep()
+        {
+            var kept = Texts.Language;
+            var seen = new HashSet<string>();
+            Action<string> problem = delegate(string text) { if (seen.Add(text)) Problems.Add(text); };
+            foreach (var language in Texts.Languages)
+            {
+                Texts.Language = language;
+                var word = Texts.T("locked");
+                foreach (var scale in new[] { 1f, 1.25f, 1.5f, 1.75f, 2f })
+                {
+                    foreach (var set in TotalsSets)
+                    {
+                        var v = TotalsValues(set, null, null);
+                        foreach (var locked in new[] { false, true })
+                        {
+                            var where = set + (locked ? " locked" : "") + " (" + language + ") at " + (int)(scale * 100) + "%: ";
+                            foreach (var small in new[] { true, false })
+                            {
+                                foreach (var user in small ? new[] { Size.Empty } : new[] { Size.Empty, new Size(340, 520), new Size(445, 620) })
+                                {
+                                    var size = FloatPainter.Measure(v, small, user, null, locked);
+                                    var name = (small ? "small" : "large") + " float with totals" + (user.IsEmpty ? "" : " " + user.Width + "x" + user.Height) + ", " + where;
+                                    if (small && size.Width != FloatPainter.SmallTotalsWidth) problem(name + "it is " + size.Width + " wide, not " + FloatPainter.SmallTotalsWidth);
+                                    using (var bitmap = new Bitmap((int)Math.Round(size.Width * scale), (int)Math.Round(size.Height * scale), PixelFormat.Format32bppArgb))
+                                    using (var g = Graphics.FromImage(bitmap))
+                                    {
+                                        var hits = FloatPainter.Paint(g, v, small, scale, null, 0, null, false, user, locked, null, word);
+                                        // The small size with totals is 114 tall, and taller only by its own shop and by a head of more than one line.
+                                        if (small && v.Shop == null && size.Height != FloatPainter.SmallTotalsHeight + (int)Math.Ceiling(hits.HeadExtra)) problem(name + "it is " + size.Height + " tall, not " + FloatPainter.SmallTotalsHeight + " and its head's " + hits.HeadExtra);
+                                        foreach (var p in hits.Problems) problem(name + p);
+                                        var z = hits.Zoom;
+                                        var inside = new RectangleF(0, 0, size.Width / z + 0.01f, size.Height / z + 0.01f);
+                                        var buttons = new[] { hits.Stop, hits.Start, hits.Reset, hits.ShopAlways, hits.ShopNotNow, hits.Size, hits.Close };
+                                        for (var i = 0; i < buttons.Length; i++)
+                                        {
+                                            if (buttons[i].IsEmpty) continue;
+                                            if (!inside.Contains(buttons[i])) problem(name + "a button lies outside it");
+                                            for (var j = i + 1; j < buttons.Length; j++) if (!buttons[j].IsEmpty && RectangleF.Intersect(buttons[i], buttons[j]).Width > 0.01f && RectangleF.Intersect(buttons[i], buttons[j]).Height > 0.01f) problem(name + "two buttons lie over each other");
+                                        }
+                                        if (locked && (!hits.ShopAlways.IsEmpty || !hits.Stop.IsEmpty || !hits.Start.IsEmpty)) problem(name + "something can still be clicked");
+                                        if (!locked && v.Shop != null && v.Shop.Asks && (hits.ShopAlways.IsEmpty || hits.ShopNotNow.IsEmpty)) problem(name + "the shop's question has no buttons");
+                                        // The long map's name of the owner's test goes on to a second line at the usual width, whole.
+                                        if (!small && user.IsEmpty && set.EndsWith("-long-map", StringComparison.Ordinal) && hits.Wrapped == 0) problem(name + "the long map's name stands on one line");
+                                        if (small && set == "shop-ask-long-question" && hits.Wrapped == 0) problem(name + "the long question stands on one line");
+                                        MapInHead(set, v, small, user, hits, name, problem);
+                                        // The shop's buttons stand under its last line, inside the float.
+                                        if (!locked && !hits.ShopAlways.IsEmpty && hits.ShopAlways.Bottom > size.Height / z - (small ? 0 : 28 + 10) + 0.01f) problem(name + "the shop's buttons pass the bottom");
+                                    }
+                                }
+                            }
+                            var bar = FloatPainter.MeasureBar(v, locked, word, scale);
+                            foreach (var more in new[] { 0, 80 })
+                            {
+                                var name = "bar with totals" + (more > 0 ? " widened" : "") + ", " + where;
+                                if (bar.Height != FloatPainter.BarHeight) problem(name + "it is " + bar.Height + " tall");
+                                using (var bitmap = new Bitmap((int)Math.Round((bar.Width + more) * scale), (int)Math.Round(bar.Height * scale), PixelFormat.Format32bppArgb))
+                                using (var g = Graphics.FromImage(bitmap))
+                                {
+                                    var hits = FloatPainter.PaintBar(g, v, scale, null, false, locked, word, bar.Width + more);
+                                    foreach (var p in hits.Problems) problem(name + p);
+                                    if (!hits.ShopAlways.IsEmpty) problem(name + "the bar asks the shop's question");
+                                    MapInHead(set, v, false, Size.Empty, hits, name + "(bar) ", problem);
+                                    // "Shop online · 16 offers" is a short tile: "Shop online" over "16 offers".
+                                    if ((set.Contains("shop-online") || set.Contains("shop-closing")) && hits.Wrapped == 0) problem(name + "the shop's tile is one long line");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Texts.Language = kept;
         }
 
         private static List<KeyValuePair<string, FloatValues>> Floats()

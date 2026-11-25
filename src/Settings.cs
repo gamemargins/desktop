@@ -59,10 +59,20 @@ namespace GameMargins.Uploader
         public string TempoToken;
         /// <summary>The player read what Tempo looks at and said yes; asked once, before Tempo first watches.</summary>
         public bool TempoConsent;
-        /// <summary>"Start Tempo with MapleStory": off unless the player ticks it. Only while on does the program look for the game's window by itself.</summary>
+        /// <summary>
+        /// "Start Tempo with MapleStory" of 0.4.0 and 0.4.1. Since 0.4.2 Tempo reads whenever the program runs with the game
+        /// open, so this does nothing; it stays in the file, so a copy that goes back to 0.4.1 finds it as it was.
+        /// </summary>
         public bool StartTempoWithGame;
-        /// <summary>"Show the float": the small always-on-top window, shown while Tempo is open.</summary>
-        public bool FloatShown = true;
+        /// <summary>"Put my shop online by itself" (Tempo's Settings, or "Always" on the float): the player's own shop goes on the Market whenever Tempo sees it open. Off until they say so.</summary>
+        public bool ShopAuto;
+        /// <summary>
+        /// "Show the float": the small always-on-top window over the game. Off for a new player, who sees only the green
+        /// dot at the first game start, until they turn it on (Tempo › Float); from then on it comes as they left it. Every
+        /// settings file a version with the float wrote (0.3.0 on) holds this, so a player's own choice stays; a file
+        /// without it is older than the float (WoW only) and starts with it off too.
+        /// </summary>
+        public bool FloatShown;
         /// <summary>"Lock the float (click through)".</summary>
         public bool FloatLocked;
         /// <summary>The float's size: "large", "small" or "bar" (the bar from 0.4.1).</summary>
@@ -79,12 +89,25 @@ namespace GameMargins.Uploader
         public Dictionary<string, string> FloatPlaces = new Dictionary<string, string>();
         /// <summary>Where the bar stood, "x,y,side" (x its left, its right or its middle: the side it sticks to), per arrangement of screens; apart from the float's.</summary>
         public Dictionary<string, string> FloatBarPlaces = new Dictionary<string, string>();
+        /// <summary>
+        /// Where the float (small or large) and the bar stood at the game, so each is there again when the game's window comes
+        /// back (FloatWindow.AtGameText: "LR,0,TT,40", which of its sides at which of the game's and how far). "": it stood
+        /// away from the game and keeps its own place on the screen; null: not known yet.
+        /// </summary>
+        public string FloatAtGame, FloatBarAtGame;
         /// <summary>The Tempo window's place and size, "x,y,w,h"; null until it was moved.</summary>
         public string TempoBounds;
         /// <summary>The first start's steps were gone through once: after that a step that comes back (a link the site dropped) shows without the step bars.</summary>
         public bool SetupDone;
         /// <summary>The question "May Tempo look at your MapleStory window?" was answered, with yes or with "No, not now".</summary>
         public bool TempoAsked;
+        /// <summary>
+        /// The player turned "Tempo may look at the MapleStory window" off himself (Settings here, or Tempo's own Settings:
+        /// TakeConsent), not "No, not now" and not never asked; off again with his yes (GiveConsent). Overview, MapleStory's
+        /// page and the menu then say so and offer "Turn back on" (the owner's pick 3 A of 25 November 2026). A program
+        /// that was turned off before this setting existed has it false: the words of "not yet" as before.
+        /// </summary>
+        public bool TempoTurnedOff;
         /// <summary>The language was picked in Settings: the account's language on the site no longer changes it.</summary>
         public bool LocalePicked;
         /// <summary>The version the program last updated itself to and when, for the window's line "Updated to x last night".</summary>
@@ -121,7 +144,8 @@ namespace GameMargins.Uploader
                 s.TempoToken = Unprotect(Json.Str(json, "tempoToken"));
                 s.TempoConsent = Json.Bool(json, "tempoConsent");
                 s.StartTempoWithGame = Json.Bool(json, "startTempoWithGame");
-                s.FloatShown = !Json.Has(json, "floatShown") || Json.Bool(json, "floatShown");
+                s.ShopAuto = Json.Bool(json, "shopAuto");
+                s.FloatShown = Json.Has(json, "floatShown") && Json.Bool(json, "floatShown");
                 s.FloatLocked = Json.Bool(json, "floatLocked");
                 var floatSize = Json.Str(json, "floatSize");
                 s.FloatSize = floatSize == "small" || floatSize == "bar" ? floatSize : "large";
@@ -134,6 +158,7 @@ namespace GameMargins.Uploader
                 s.TempoBounds = Json.Str(json, "tempoBounds");
                 s.SetupDone = Json.Bool(json, "setupDone");
                 s.TempoAsked = Json.Bool(json, "tempoAsked") || s.TempoConsent;
+                s.TempoTurnedOff = Json.Bool(json, "tempoTurnedOff") && !s.TempoConsent;
                 s.LocalePicked = Json.Bool(json, "localePicked");
                 s.UpdatedTo = Json.Str(json, "updatedTo");
                 DateTime updatedAt;
@@ -143,6 +168,8 @@ namespace GameMargins.Uploader
                 if (places != null) foreach (var place in places) if (place.Value is string) s.FloatPlaces[place.Key] = (string)place.Value;
                 var barPlaces = Json.Object(json, "floatBarPlaces");
                 if (barPlaces != null) foreach (var place in barPlaces) if (place.Value is string) s.FloatBarPlaces[place.Key] = (string)place.Value;
+                s.FloatAtGame = Json.Str(json, "floatAtGame");
+                s.FloatBarAtGame = Json.Str(json, "floatBarAtGame");
                 s.Site = Json.Str(json, "site");
                 s.WowFolder = Json.Str(json, "wowFolder");
                 s.Locale = Json.Str(json, "locale");
@@ -202,6 +229,7 @@ namespace GameMargins.Uploader
                     { "tempoToken", Protect(TempoToken) },
                     { "tempoConsent", TempoConsent },
                     { "startTempoWithGame", StartTempoWithGame },
+                    { "shopAuto", ShopAuto },
                     { "floatShown", FloatShown },
                     { "floatLocked", FloatLocked },
                     { "floatSize", FloatSize },
@@ -211,9 +239,12 @@ namespace GameMargins.Uploader
                     { "languageStep", LanguageStep },
                     { "floatPlaces", FloatPlaces },
                     { "floatBarPlaces", FloatBarPlaces },
+                    { "floatAtGame", FloatAtGame },
+                    { "floatBarAtGame", FloatBarAtGame },
                     { "tempoBounds", TempoBounds },
                     { "setupDone", SetupDone },
                     { "tempoAsked", TempoAsked },
+                    { "tempoTurnedOff", TempoTurnedOff },
                     { "localePicked", LocalePicked },
                     { "updatedTo", UpdatedTo },
                     { "updatedAt", UpdatedAt == default(DateTime) ? null : UpdatedAt.ToUniversalTime().ToString("o") },

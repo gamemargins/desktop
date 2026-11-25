@@ -208,7 +208,7 @@ namespace GameMargins.Uploader
             var yes = ui.Button("yes", x, y, Texts.T("Yes, Tempo may look"), Ui.Gold, SayYes, true);
             ui.Button("no", yes.Right + 8, y, Texts.T("No, not now"), Ui.Plain, SayNo, true);
             y += Look.ButtonHeight + 14;
-            ui.Para(Texts.T("Only what Tempo reads goes to GameMargins: shop prices and your session's numbers. You can turn this off later in Settings."), ui.Small, p.Muted, x, y, StepWidth);
+            ui.Para(Texts.T("Only what Tempo reads goes to GameMargins: shop prices, kills and drops for the Drop database, your shop if you put it online, and your session's numbers. You can turn this off later in Settings."), ui.Small, p.Muted, x, y, StepWidth);
         }
 
         // ------------------------------------------------------------------------------------------------ the list and its pages
@@ -306,7 +306,8 @@ namespace GameMargins.Uploader
                 var status = TempoStatus();
                 var ready = _tempo.Linked && _tempo.Consent;
                 if (shut) y = GameRow(ui, x, y, w, "maple", "MapleStory Classic", status, Texts.T("Details"), Ui.Plain, delegate { Go("maple"); }, true);
-                else y = GameRow(ui, x, y, w, "maple", "MapleStory Classic", status, ready ? Texts.T("Open Tempo") : Texts.T("Answer the question"), Ui.Gold, OpenTempoOrWindow, true);
+                // Turned off by the player: "Turn back on" opens the question, as "Answer the question" does (pick 3 A).
+                else y = GameRow(ui, x, y, w, "maple", "MapleStory Classic", status, ready ? Texts.T("Open Tempo") : MapleOffButton(), Ui.Gold, OpenTempoOrWindow, true);
             }
             if (_settings.Wow)
             {
@@ -341,13 +342,22 @@ namespace GameMargins.Uploader
             return y + height + 10;
         }
 
+        /// <summary>
+        /// The gold button while Tempo may not look: "Turn back on" after the player turned it off himself (the owner's
+        /// pick 3 A of 25 November 2026), else "Answer the question". Both open the question.
+        /// </summary>
+        private string MapleOffButton()
+        {
+            return _tempo.Linked && _tempo.TurnedOff ? Texts.T("Turn back on") : Texts.T("Answer the question");
+        }
+
         private float DrawMaple(Ui ui, float x, float y, float w)
         {
             var p = ui.P;
             if (_tempo.Refused) return DrawMapleRefused(ui, x, y, w);
             if (_tempo.CantLook) return DrawMapleCantLook(ui, x, y, w);
             var ready = _tempo.Linked && _tempo.Consent;
-            Head(ui, x, y, w, "MapleStory Classic", "open-tempo", ready ? Texts.T("Open Tempo") : Texts.T("Answer the question"), Ui.Gold, OpenTempoOrWindow, _tempo.SiteAllowed);
+            Head(ui, x, y, w, "MapleStory Classic", ready || !_tempo.Linked || !_tempo.TurnedOff ? "open-tempo" : "turn-on", ready ? Texts.T("Open Tempo") : MapleOffButton(), Ui.Gold, OpenTempoOrWindow, _tempo.SiteAllowed);
             y += Look.ButtonHeight + 6;
             var status = TempoStatus();
             y += ui.Status(x, y, w, TrayPaint.ToneColour(p, status[1]), status[0], status[1] == "bad" ? p.Negative : status[1] == "warn" ? p.Warning : p.Muted) + 8;
@@ -362,7 +372,7 @@ namespace GameMargins.Uploader
             var rows = 3;
             ui.Card(x, y, w, rows * RowHeight);
             Row(ui, x, y, w, true, Texts.T("Game window"), _tempo.GameFound == true ? Texts.T("found") : _tempo.GameFound == false ? Texts.T("MapleStory is not running") : Texts.T("not looking"), _tempo.GameFound == true ? "" : "muted", 0);
-            Row(ui, x, y + RowHeight, w, false, Texts.T("Tempo may look at the game"), _tempo.Consent ? Texts.T("yes") : Texts.T("not yet"), _tempo.Consent ? "" : "muted", 0);
+            Row(ui, x, y + RowHeight, w, false, Texts.T("Tempo may look at the game"), _tempo.Consent ? Texts.T("yes") : _tempo.TurnedOff ? Texts.T("no · you turned it off") : Texts.T("not yet"), _tempo.Consent ? "" : "muted", 0);
             Row(ui, x, y + 2 * RowHeight, w, false, Texts.T("Float"), !_settings.FloatShown ? Texts.T("hidden") : _settings.FloatLocked ? Texts.T("shown · locked") : Texts.T("shown"), _settings.FloatShown ? "" : "muted", 0);
             y += rows * RowHeight + 10;
             y += ui.Para(Texts.T("Tempo has its own window. Its settings, and the float's, are in that window under Settings."), ui.Small, p.Muted, x, y, w) + 4;
